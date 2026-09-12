@@ -232,6 +232,14 @@
 - 观测不是跑通的前提：没装 SDK 或出口配错只记一条告警，报告里单列「观测」段
 - 顺带发现：`gen_ai.response.model` 显示 DeepSeek 把 `deepseek-chat` 路由到了 `deepseek-flash`——这种「请求模型 ≠ 实际模型」以前是看不见的
 
+### ⑤-1 明细加 limit（技术债）
+
+- 问题：`query_nearby` 把命中明细全量回给模型。实测一次 10 公里半径的高校查询命中 158 条、37920 字符，回喂时被截到 20000 字符——模型拿不到完整列表，转头去沙箱里捞全量，连着几步都耗在那儿，最后交了个空答案
+- 改法：`query_nearby` 加 `limit`（默认 50，传 0 不限）。计数（`count_total` / `count_point` / `count_area`）在截断前算完，明细按距离取前 N 条；同时回 `count_returned` / `returned_point` / `returned_area` / `hits_truncated`
+- 自检器跟着改：截断时校验 `count_returned` 与实际条数、确认 `returned_*` 不超过 `count_*`；没截断时才校验 `count_total`。少查一项，「截断」就成了数字对不上的借口
+- 提示词加一句：结果被截断时正确做法是调大 limit 重查，不是用 run_python 去把全量明细捞出来
+- 评测：`project()` 只冻结计数与前三条最近设施，所以口径没变；重跑 `build_eval.py` 后 `ground_truth.json` 只有 fingerprint 两行变化，`--mode data` 仍是 41/41
+
 ### ④-3 多 Agent（规划者 / 执行者 / 复核者）
 
 - 角色边界：规划者只拆问题、可以先查经验库，不产出任何数值；执行者就是原来那条裸循环（带上计划跑）；复核者零工具、只判断、不改写回答、不产出数值

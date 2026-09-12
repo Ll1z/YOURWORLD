@@ -43,6 +43,7 @@
 - 类别查询不设默认类别：`query_nearby` / `summarize_poi` 的类别必须由调用方给定，认不出来就报错并给近似建议，**绝不返回 0 条**（0 条要留给「真的没有」）。可查类别是库内真实存在的 `(category_key, category_value)` 组合（469 个，见 `compute://categories`），中文说法（高校 / 药店 / 公园…）在 `servers/geo_knowledge/categories/aliases.json`，由 `query.expand_category` 单点展开——默认值会把「想查 A 却拿到 B」变成静默替换
 - 每个数据集必须配一张数据卡片（dataset card），字段规范见 `HANDOFF.md`
 - MCP 分工：Resource 承载上下文（数据卡、schema、字典），Tool 承载动作与计算，不把一切都做成 Tool
+- 工具返回的明细必须有上限：计数保持完整、明细按距离取前 N 条，并显式标注 `hits_truncated`。模型够不着的明细等于不存在——实测一次 10 公里半径的高校查询命中 158 条、37920 字符，回喂时被截到 20000，模型拿不到全量反而跑去沙箱里折腾了好几步
 - 空间对象查询走空间索引（R-tree / H3 网格），不用向量检索做空间过滤
 - 知识检索只有一套口径：`search_knowledge` / `search_datasets` 走混合检索，索引缺失时直接报错，**不得静默退回关键词匹配**——换一种检索方式就是换了一套口径
 - Agent 生成的代码一律在 `sandbox/run_<id>/` 内以受限子进程执行：禁网、超时（默认 30 秒）、内存上限（默认 1024 MB）、数据只读、只许写运行目录。`run_python` 是它的对外入口，也是唯一入口——不要在别处起子进程跑 Agent 写的代码

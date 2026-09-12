@@ -1,10 +1,10 @@
 {
  "version": "1.0",
- "generated": "20260912T104726Z",
+ "generated": "20260912T113728Z",
  "generator": "scripts/build_eval.py",
  "fingerprint": {
   "servers/geo_compute/query.py": "d322eedeaad9d12e",
-  "servers/geo_compute/server.py": "3ef99df29ebc26ca",
+  "servers/geo_compute/server.py": "ed988c1734f5b65e",
   "servers/geo_knowledge/poi_scope.json": "31979b2d1db094c8",
   "servers/geo_knowledge/categories/aliases.json": "8f3b01c32cc321f8",
   "data/processed/geo.duckdb": "19673088:1789205069"

@@ -143,15 +143,31 @@ def check_magnitude(result: dict) -> Check:
     problems: list[str] = []
     hits = result.get("hits", [])
     total = result.get("count_total")
+    # 明细可以被 limit 截断（这是回给模型的体积控制），但截断必须被明说：
+    # 截断时校验 count_returned 与实际条数、并确认 returned_* 不超过 count_*；
+    # 没截断时校验 count_total 与实际条数。少查一项，「截断」就成了数字对不上的借口。
+    truncated = bool(result.get("hits_truncated"))
+    returned = result.get("count_returned")
+    if returned is None:  # 老轨迹里的结果没有这个字段
+        returned = len(hits)
 
-    if total != len(hits):
+    if truncated:
+        if returned != len(hits):
+            problems.append(f"hits_truncated=true，但 count_returned={returned} "
+                            f"与 hits 实际长度 {len(hits)} 不一致")
+        if returned > total:
+            problems.append(f"count_returned={returned} 超过 count_total={total}")
+    elif total != len(hits):
         problems.append(f"count_total={total} 与 hits 实际长度 {len(hits)} 不一致")
     if result.get("count_point", 0) + result.get("count_area", 0) != total:
         problems.append("点层计数 + 面层计数 != 总数")
-    if result.get("count_point") != sum(1 for h in hits if h["layer"] == "poi_point"):
-        problems.append("count_point 与 hits 中点层条数不符")
-    if result.get("count_area") != sum(1 for h in hits if h["layer"] == "poi_area"):
-        problems.append("count_area 与 hits 中面层条数不符")
+
+    expected_point = result.get("returned_point", result.get("count_point"))
+    expected_area = result.get("returned_area", result.get("count_area"))
+    if expected_point != sum(1 for h in hits if h["layer"] == "poi_point"):
+        problems.append("返回的点层条数与 hits 中点层条数不符")
+    if expected_area != sum(1 for h in hits if h["layer"] == "poi_area"):
+        problems.append("返回的面层条数与 hits 中面层条数不符")
 
     keys = [(h["layer"], h["osm_id"]) for h in hits]
     if len(keys) != len(set(keys)):
@@ -171,7 +187,9 @@ def check_magnitude(result: dict) -> Check:
         problems.append(f"命中数 {total} 量级异常，北京五区一个点周围不可能有这个数量")
 
     detail = "；".join(problems) or (
-        f"{total} 条命中：计数自洽、主键无重复、距离严格升序"
+        (f"{total} 条命中（明细回 {returned} 条，已截断）；计数自洽、主键无重复、距离严格升序"
+         if truncated else
+         f"{total} 条命中：计数自洽、主键无重复、距离严格升序")
         + (f"、未越出 {district}" if district else "")
     )
     return Check("magnitude", not problems, detail)

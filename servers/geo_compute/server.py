@@ -16,7 +16,7 @@ from geo_compute.sandbox import LocalProcessSandbox
 
 mcp = MCPServer(
     name="geo-compute",
-    version="0.3.0",
+    version="0.4.0",
     description="空间查询与统计。数据为北京五区的 OSM POI 与行政边界，"
                 "坐标系 EPSG:4326，距离在 UTM 50N 下按米计算；"
                 "另有受限沙箱 run_python 供工具覆盖不到的计算使用。",
@@ -69,9 +69,15 @@ class NearbyResult(BaseModel):
                                description="本次使用的预设名；用 categories 自由类别时为 null")
     categories: list[CategoryTally] = Field(
         description="每个请求类别的命中数明细，含 0 命中——0 是结论本身，不是工具失败")
-    count_total: int
+    count_total: int = Field(description="命中总数；明细被 limit 截断时这个数仍然是完整的")
     count_point: int
     count_area: int
+    count_returned: int = Field(description="本次返回的明细条数")
+    returned_point: int
+    returned_area: int
+    hits_truncated: bool = Field(
+        description="true 表示明细被 limit 截断：计数完整、列表不全。"
+                    "此时不要用沙箱去捞全量，调大 limit 重查即可")
     hits: list[PoiHit]
     suspected_duplicates: list[dict] = Field(
         default_factory=list,
@@ -223,7 +229,7 @@ def find_places(name: str, district: str | None = None, limit: int = 10) -> list
 @mcp.tool()
 def query_nearby(lon: float, lat: float, radius_m: float = 1000.0,
                  district: str | None = None, categories: list[str] | None = None,
-                 preset: str | None = None) -> NearbyResult:
+                 preset: str | None = None, limit: int = 50) -> NearbyResult:
     """查询一个点周围指定半径内有哪些设施，返回按距离升序的明细。
 
     参数：
@@ -236,6 +242,9 @@ def query_nearby(lon: float, lat: float, radius_m: float = 1000.0,
                    多个类别  ["高校", "银行"]
                  可查的值清单见 compute://categories。
       preset     常用组合的快捷方式（见 compute://schema 的 presets），与 categories 二选一。
+      limit      明细最多回多少条，默认 50；传 0 表示不限。count_total 与逐类别计数
+                 永远是全量，被截断时 hits_truncated 为 true。一次大半径查询可能命中上万条，
+                 全塞回来只会把结果撑爆、让真正有用的部分看不见。
 
     categories 与 preset 都不给会直接报错：本工具没有默认类别。默认一个类别会让
     「想查高校却拿到医院」变成静默替换，看起来像正常结果。
@@ -252,15 +261,25 @@ def query_nearby(lon: float, lat: float, radius_m: float = 1000.0,
     except ValueError as e:
         raise ToolError(str(e)) from e
     dups = query.find_duplicates(df)
-    hits = [PoiHit(**{k: r.get(k) for k in PoiHit.model_fields}) for r in df.to_dict("records")]
+    # 计数在截断前算完，明细按距离取前 limit 条：
+    # 实测一次 10 公里半径的高校查询返回 158 条、37920 字符，回喂时被截到 20000，
+    # 模型拿不到完整列表就跑去沙箱里捞，连着几步都耗在那儿。
+    count_total, count_point, count_area = len(df), \
+        int((df["layer"] == "poi_point").sum()), int((df["layer"] == "poi_area").sum())
+    shown = df if limit <= 0 else df.head(int(limit))
+    hits = [PoiHit(**{k: r.get(k) for k in PoiHit.model_fields}) for r in shown.to_dict("records")]
 
     return NearbyResult(
         center_lon=lon, center_lat=lat, center_source="调用方给定",
         radius_m=radius_m, district=district, preset=preset,
         categories=[CategoryTally(**t) for t in query.category_tally(df, specs)],
-        count_total=len(df),
-        count_point=int((df["layer"] == "poi_point").sum()),
-        count_area=int((df["layer"] == "poi_area").sum()),
+        count_total=count_total,
+        count_point=count_point,
+        count_area=count_area,
+        count_returned=len(shown),
+        returned_point=int((shown["layer"] == "poi_point").sum()),
+        returned_area=int((shown["layer"] == "poi_area").sum()),
+        hits_truncated=len(shown) < count_total,
         hits=hits,
         suspected_duplicates=dups,
         crs_note=CRS_NOTE,
@@ -270,6 +289,8 @@ def query_nearby(lon: float, lat: float, radius_m: float = 1000.0,
             "OSM 完备性取决于志愿者测绘，结论应表述为「OSM 数据显示」",
             "面层以代表点参与距离计算，与设施实际入口可能有偏差",
             "categories 里 count=0 的类别就是「确实没有」，不要换成别的类别来替代",
+            "hits 只是最近 limit 条；hits_truncated 为 true 时完整列表要用更大的 limit 重查，"
+            "不要用 run_python 绕过去捞全量明细——那等于在脚本里重写一遍查询口径",
             "只覆盖 poi_point / poi_area 两层；地铁站、火车站等只在 anchor 层，不参与半径检索",
         ],
     )
