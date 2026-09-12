@@ -14,7 +14,11 @@ sandbox/run_*/
 
 # 数据与索引（体积大、可重新下载，不入库）
 data/raw/
-data/processed/
+data/processed/*
 *.duckdb
 *.duckdb.wal
 *.gpkg
+
+# 例外：充当系统原子单元的地基数据入库
+!data/processed/districts_wgs84.geojson
+!data/processed/districts_wgs84.gpkg

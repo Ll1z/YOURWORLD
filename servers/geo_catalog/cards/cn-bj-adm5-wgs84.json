@@ -1,0 +1,64 @@
+{
+  "id": "cn-bj-adm5-wgs84",
+  "name": "北京市五区（东城/西城/朝阳/丰台/海淀）行政边界 WGS84",
+  "description": "本项目派生的区级行政边界，供 Stage 1 的空间分析使用。四区直接取自 OSM 高精度边界，西城区因 OSM 缺失由 DataV 边界经 GCJ-02 纠偏补齐。",
+  "spatial": {
+    "bbox": [116.0484, 39.7611, 116.6453, 41.3677],
+    "note": "五区拼接范围；海淀区北界至 40.16"
+  },
+  "temporal": {
+    "derived_at": "2026-09-12",
+    "upstream": "OSM 2026-09-11 / DataV 未标注版本"
+  },
+  "resolution": {
+    "geometric_accuracy": "四区为 OSM 原始精度；西城区受 DataV 概化影响，与街道级边界交点存在约百米级差异"
+  },
+  "crs": {
+    "epsg": 4326,
+    "name": "WGS84",
+    "note": "全部经统一纠偏与校验，无加密偏移"
+  },
+  "format": {
+    "files": [
+      "data/processed/districts_wgs84.geojson",
+      "data/processed/districts_wgs84.gpkg"
+    ],
+    "layer": "districts"
+  },
+  "schema": {
+    "adcode": "行政区划代码，字符串语义（如 110101 东城区）",
+    "name": "区名",
+    "source": "边界来源：OSM(直接) 或 DataV+GCJ02纠偏",
+    "area_km2": "大地线面积（pyproj.Geod），平方公里",
+    "note": "来源说明与验证记录",
+    "geometry": "Polygon / MultiPolygon，EPSG:4326"
+  },
+  "units": {
+    "area_km2": "平方公里（大地线面积，椭球面精确）",
+    "note": "面积口径为大地线，非投影面积；距离与缓冲区另用 UTM 50N (EPSG:32650)"
+  },
+  "update_frequency": "随上游数据重建，脚本 scripts/build_district_boundaries.py",
+  "source": {
+    "primary": "OSM（ODbL 1.0，© OpenStreetMap contributors）",
+    "fill_in": "DataV.GeoAtlas（许可不明确，仅个人学习使用）",
+    "derived_by": "scripts/build_district_boundaries.py"
+  },
+  "sample_rows": [
+    {"adcode": "110101", "name": "东城区", "source": "OSM(直接)", "area_km2": 41.915},
+    {"adcode": "110102", "name": "西城区", "source": "DataV+GCJ02纠偏", "area_km2": 50.145},
+    {"adcode": "110108", "name": "海淀区", "source": "OSM(直接)", "area_km2": 430.814}
+  ],
+  "validation": {
+    "gcj02_calibration": "用有 OSM 真值的四区校准纠偏算法：质心残差从 517-562 m 降到 6.0-17.9 m，IoU 从 0.709-0.907 升到 0.974-0.989",
+    "xicheng_cross_check": "西城区由两个独立来源交叉验证：14 个街道 dissolve（47.45 km²）vs DataV 纠偏（50.14 km²），IoU 0.9195。差异 3.39 km² 的质心距白纸坊街道 POI 仅约 110 m，且该 POI 落在差异区域内，证实差异完全由白纸坊街道边界缺失解释",
+    "external_area_check": "与公开面积对照偏差：东城 +0.18%、西城 -1.09%、朝阳 -1.24%、丰台 -0.10%、海淀 0.00%"
+  },
+  "known_pitfalls": [
+    "西城区边界来自 DataV 纠偏而非 OSM，是五区中唯一的二手来源，精度低于其他四区。",
+    "西城区的白纸坊街道范围来自 DataV 纠偏结果，未经 OSM 街道级数据交叉确认。",
+    "OSM 原始 admin_level=6 边界中「东城区」与「朝阳区」等名称需配合 boundary=administrative 过滤，避免误匹配普通面要素。",
+    "石景山区在 OSM 中 name 带前导空格，本项目未纳入五区，但若扩展需注意。",
+    "五区边界之间存在 OSM 与 DataV 混合来源，接缝处可能出现极窄缝隙或重叠，做拓扑运算前建议先做 snap 或统一到街道级底层数据。",
+    "面积随边界来源不同而有系统性差异，跨数据集比较面积时必须核对 source 字段。"
+  ]
+}

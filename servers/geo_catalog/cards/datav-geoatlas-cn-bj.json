@@ -1,0 +1,59 @@
+{
+  "id": "datav-geoatlas-cn-bj",
+  "name": "DataV.GeoAtlas 北京市区县行政边界",
+  "description": "阿里 DataV.GeoAtlas 提供的北京市 16 个区县边界 GeoJSON。本项目仅用作西城区缺失边界的补齐来源与交叉验证对照，不直接用于空间计算。",
+  "spatial": {
+    "bbox": [115.42, 39.44, 117.51, 41.06],
+    "note": "覆盖北京市全部 16 个区县"
+  },
+  "temporal": {
+    "data_date": "未标注版本年份",
+    "note": "DataV 边界来源为高德系数据，版本信息不透明"
+  },
+  "resolution": {
+    "geometric_accuracy": "经过几何概化简化，与高精度边界相比 P95 顶点残差可达 165 m（丰台区实测）",
+    "precision": "概化程度各区不一致"
+  },
+  "crs": {
+    "epsg": null,
+    "name": "GCJ-02（火星坐标系）",
+    "note": "文件本身不声明 CRS，经实测确认为 GCJ-02 加密偏移坐标系",
+    "measured_offset_wgs84": {
+      "东城区": {"east_m": 531, "north_m": 161, "straight_m": 554},
+      "海淀区": {"east_m": 542, "north_m": 150, "straight_m": 562},
+      "朝阳区": {"east_m": 503, "north_m": 120, "straight_m": 517},
+      "丰台区": {"east_m": 541, "north_m": 154, "straight_m": 562},
+      "结论": "四区偏移高度一致、面积比 0.995-1.000，属加密坐标系的系统性平移，非随机误差"
+    },
+    "correction": "servers/geo_knowledge/coords/gcj02.py 的 gcj02_to_wgs84（迭代反解）。纠偏后质心残差降至 6.0-17.9 m，IoU 0.974-0.989（纠偏前 0.709-0.907）。残余误差来自边界概化，不是纠偏误差。"
+  },
+  "format": {
+    "file": "data/raw/beijing_datav_full.json",
+    "size_kb": 99
+  },
+  "layers": {
+    "features": 16,
+    "properties": ["adcode", "name", "center", "centroid", "childrenNum", "level", "parent", "subFeatureIndex", "acroutes"]
+  },
+  "units": {
+    "coordinates": "十进制度（GCJ-02）",
+    "note": "严禁未经纠偏直接与其他 WGS84 数据做空间运算"
+  },
+  "update_frequency": "未知（DataV 不提供版本号）",
+  "source": {
+    "url": "https://geo.datav.aliyun.com/areas_v3/bound/110000_full.json",
+    "license": "未明确声明。个人学习、不公开分发，仅作对照与补齐使用",
+    "attribution": "阿里云 DataV.GeoAtlas"
+  },
+  "sample_rows": [
+    {"adcode": 110101, "name": "东城区", "center": [116.418757, 39.917544]},
+    {"adcode": 110102, "name": "西城区", "center": [116.366794, 39.915309]}
+  ],
+  "known_pitfalls": [
+    "是 GCJ-02 加密坐标，直接用会整体偏移约 550 m。必须先经 gcj02_to_wgs84 纠偏。",
+    "文件不声明 CRS，任何集成方都必须自行判定；本项目通过四区与 OSM 真值对照实测得出。",
+    "边界经过概化简化，不适合做高精度面积或边界精度敏感的分析。",
+    "properties.center 是标注点，不是几何质心，两者不要混用。",
+    "许可不明确，不应作为可分发数据的来源。"
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "id": "osm-beijing-full",
+  "name": "OpenStreetMap 北京市省级切片",
+  "description": "openstreetmap.fr 提供的北京市省级 OSM 提取，含道路、建筑、POI、行政边界、土地利用等要素。Stage 1 的分析计算主数据源。",
+  "spatial": {
+    "bbox": [113.6638, 39.3270, 117.7519, 41.3677],
+    "note": "extract 含缓冲区，实际范围大于北京市行政区（116.0-117.5 / 39.4-41.1）。分析必须先用行政边界裁剪。"
+  },
+  "temporal": {
+    "data_date": "2026-09-11",
+    "osm_sequence_number": 7281495
+  },
+  "resolution": {
+    "geometric_accuracy": "取决于志愿者的测绘手段，城市建成区通常 1-10 m，郊区更粗",
+    "completeness": "北京城区 POI 覆盖较好；属性完整度不均衡"
+  },
+  "crs": {
+    "epsg": 4326,
+    "name": "WGS84",
+    "note": "OSM 原生 WGS84，无 GCJ-02 / BD-09 加密偏移，可与天地图 CGCS2000 直接叠加"
+  },
+  "format": {
+    "file": "data/raw/osmf-beijing-full.osm.pbf",
+    "size_mb": 41.5,
+    "md5": "4f636b59eb5162bfa3abbe96e712d456",
+    "read_via": "GDAL OSM 驱动（pyogrio / DuckDB ST_Read 均可，无需额外依赖）"
+  },
+  "layers": {
+    "points": {"features": 159154, "schema": ["osm_id", "name", "barrier", "highway", "ref", "address", "is_in", "place", "man_made", "other_tags"]},
+    "lines": {"features": null},
+    "multilinestrings": {"features": null},
+    "multipolygons": {"features": 208706, "schema": ["osm_id", "osm_way_id", "name", "type", "aeroway", "amenity", "admin_level", "barrier", "boundary", "building", "craft", "geological", "historic", "land_area", "landuse", "leisure", "man_made", "military", "natural", "office", "place", "shop", "sport", "tourism", "other_tags"]},
+    "other_relations": {"features": 6729}
+  },
+  "units": {
+    "coordinates": "十进制度 (WGS84)",
+    "note": "面积与距离一律在米制下计算，不得直接对经纬度做几何量运算"
+  },
+  "update_frequency": "上游每日更新（openstreetmap.fr 每日重建）",
+  "source": {
+    "url": "https://download.openstreetmap.fr/extracts/asia/china/beijing.osm.pbf",
+    "license": "ODbL 1.0（署名 + 相同方式共享）",
+    "attribution": "© OpenStreetMap contributors"
+  },
+  "sample_rows": [
+    {"layer": "points", "osm_id": "8985515592", "name": "白纸坊街道", "other_tags": null},
+    {"layer": "multipolygons", "osm_id": "288600", "name": "东城区", "admin_level": "6", "boundary": "administrative"}
+  ],
+  "known_pitfalls": [
+    "GDAL OSM 驱动的 osm_id 是字符串类型（dtype=str）。用 == 288600 比较会静默返回 0 行，必须写 == '288600'。",
+    "points 图层只有固定字段，amenity / shop / healthcare / tourism 等标签全部塞在 other_tags 的 HSTORE 字符串里，需自行解析。",
+    "pyogrio 的 where= 参数会因 layer 名编码异常报 Invalid SQL query；改用 sql=\"SELECT * FROM multipolygons WHERE ...\"。",
+    "OSM 驱动不提供 total_bounds（read_info 返回 None），不能依赖它做范围检查。",
+    "北京市西城区缺失 admin_level=6 边界。根因是 OSM 主库中 relation 568660 几何损坏（Overpass 计算出的中心点在北京以东约 150 km），被提取工具丢弃。北京 16 个区中仅此一例。",
+    "西城区白纸坊街道缺失 admin_level=8 边界（该街道 POI 存在，仅边界关系缺失）。",
+    "石景山区的 name 带前导空格（\" 石景山区\"），按名字匹配时需 strip。",
+    "行政边界数据不能简单按名字 join，需同时校验 admin_level 与 boundary 标签。",
+    "BBBike 的 Beijing 切片（bbbike-beijing-bbox.osm.pbf, 21 MB）是城区 bbox 裁剪，范围仅 116.08-116.77 / 39.68-40.18，海淀与丰台西部被裁掉，区级边界只有 3 个。已弃用，仅作对照留档。"
+  ]
+}
