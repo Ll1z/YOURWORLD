@@ -70,8 +70,21 @@ FROM src
 """)
 print(f"  {len(a):,} 行")
 
+print("=== anchor ===")
+n = load(r"data\processed\anchors.gpkg", "anchor")
+n["wkt"] = shapely.to_wkt(n.geometry.values, rounding_precision=8)
+con.register("src", n[["osm_type", "osm_id", "name", "category_key", "category_value",
+                       "district", "lon", "lat", "wkt"]])
+con.execute("""
+CREATE OR REPLACE TABLE anchor AS
+SELECT osm_type, osm_id, name, category_key, category_value, district,
+       lon, lat, ST_GeomFromText(wkt) AS geom
+FROM src
+""")
+print(f"  {len(n):,} 行")
+
 print("\n=== 建立空间索引 ===")
-for tbl, col in (("districts", "geom"), ("poi_point", "geom"), ("poi_area", "geom")):
+for tbl, col in (("districts", "geom"), ("poi_point", "geom"), ("poi_area", "geom"), ("anchor", "geom")):
     try:
         con.execute(f"CREATE INDEX idx_{tbl}_rtree ON {tbl} USING RTREE ({col})")
         print(f"  {tbl}: R-tree 已建立")
@@ -86,6 +99,7 @@ print(con.execute("""
 SELECT 'districts' AS t, count(*) AS n FROM districts
 UNION ALL SELECT 'poi_point', count(*) FROM poi_point
 UNION ALL SELECT 'poi_area', count(*) FROM poi_area
+UNION ALL SELECT 'anchor', count(*) FROM anchor
 """).df().to_string(index=False))
 print("\n五区医疗类计数（点面并集）：")
 print(con.execute("""

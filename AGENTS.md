@@ -8,7 +8,7 @@
 - 目标：以个人学习为目的，跑通「地理空间分析 Agent」的完整前沿技术栈
 - 不商业化、不做产品包装，重点是架构理解与可复现的工程实现
 - 首个可验收能力：自然语言提问 → 自动发现数据 → 写代码算空间关系 → 空间自检 → 出图出报告
-- 当前阶段：Stage 1 已完成。数据接入（北京五区边界 + OSM 切片 + 数据卡片）、三个 MCP Server（geo_catalog / geo_compute / geo_knowledge）、Agent 裸循环与空间自检器均已实现，端到端问答跑通并可复现。范围见 `HANDOFF.md`
+- 当前阶段：Stage 1 已完成。数据接入（北京五区边界 + OSM 切片 + 数据卡片）、三个 MCP Server（geo_catalog / geo_compute / geo_knowledge）、Agent 裸循环与空间自检器均已实现，端到端问答跑通并可复现。可视化层已接上：`web/` 的 FastAPI 薄壳 + Cesium 前端消费 `visual_hints.json`，飞相机、标命中、画半径圈与两点连线。范围见 `HANDOFF.md`
 
 ## 沟通约定
 
@@ -30,7 +30,7 @@
 ## 数据来源
 
 - 分析计算：OSM（openstreetmap.fr 北京省级切片，WGS84；可离线、可落盘、无条款限制）
-- 可视化底图与影像：天地图（CGCS2000，与 WGS84 厘米级一致，国内加载快）
+- 可视化底图与影像：天地图（CGCS2000，与 WGS84 厘米级一致，国内加载快）。Key 是「浏览器端」类型，只能注入页面由浏览器直连，服务端代理会被拒（403 / code 301012）；Cesium 的 WMTS 层级要按 `tileMatrixLabels` 错位映射，天地图 `w` 矩阵集 id=1 就是 2×2 瓦片
 - 对照与补齐：DataV.GeoAtlas（GCJ-02，必须先纠偏才能参与空间运算）
 - 禁止：高德 / 百度数据直接用于空间计算或落盘（坐标加密 + 条款限制）
 
@@ -38,6 +38,7 @@
 
 - 数值结论（面积、距离、数量、排名）必须由代码算出，LLM 不得直接生成数字
 - 任何空间运算先显式声明 CRS；禁止拿经纬度直接算几何量。面积一律用大地线面积（`pyproj.Geod.geometry_area_perimeter`，椭球面精确、无投影变形）；距离与缓冲区用 UTM 50N（EPSG:32650，中央经线 117°E 覆盖北京）
+- 半径查询必须先有明确、可命名的中心，和路径规划要先选起点同理：中心要么由调用方给坐标，要么由 `find_places` 解析地名得到。**禁止拿行政区几何代表点（point_on_surface）当圆心**——海淀区实测，以几何代表点为圆心问「800 米内有哪些便利店」会得到 0 个，那是几何产物不是事实。口径见 `servers/geo_knowledge/anchor_scope.json`
 - 每个数据集必须配一张数据卡片（dataset card），字段规范见 `HANDOFF.md`
 - MCP 分工：Resource 承载上下文（数据卡、schema、字典），Tool 承载动作与计算，不把一切都做成 Tool
 - 空间对象查询走空间索引（R-tree / H3 网格），不用向量检索做空间过滤
@@ -53,6 +54,7 @@ servers/geo_catalog/           MCP：数据目录 + 混合检索；数据卡片�
 servers/geo_compute/           MCP：DuckDB-spatial + 沙箱执行 + 出图
 servers/geo_knowledge/         MCP：标准 / 术语 / 方法库；坐标系口径与纠偏在 coords/
 agent/                         mcp_hub（聚合三个 MCP Server）+ loop（裸循环）+ selfcheck（空间自检）+ config
+web/                           FastAPI 薄壳（server.py）与 Cesium 前端（index.html），只消费 agent/report.py 的产物
 sandbox/                       代码执行运行目录（每次运行独立子目录）
 eval/                          任务集 + 指标 + 消融实验
 data/                          样例数据与索引；raw 与 processed 默认不入库，地基数据走 .gitignore 白名单
@@ -71,10 +73,13 @@ servers/ 下的包以可编辑模式安装（hatchling），全项目可直接�
 3. `scripts/build_duckdb.py` —— 装载 DuckDB 并建立 R-tree 空间索引
 4. `scripts/ask_nearby.py` —— 端到端查询，产出 result.geojson / result.csv / query.sql / report.md
 5. `scripts/mcp_smoke_test.py` —— stdio 拉起三个 MCP Server，全量校验 tools / resources / resource templates 与工具调用
-6. `scripts/ask_agent.py "问题"` —— Agent 裸循环：自然语言 → 选 MCP 工具 → 答案 + 空间自检 + visual_hints（为 Cesium 预留）
+6. `scripts/ask_agent.py "问题"` —— Agent 裸循环：自然语言 → 选 MCP 工具 → 答案 + 空间自检 + visual_hints（前端消费）
+7. `web/server.py` —— Web 入口：`uv run python web/server.py --port 8000`，浏览器打开 `http://127.0.0.1:8000`
+
+Agent 循环跑在 `web/server.py` 里的独立后台事件循环中：MCP stdio 会话绑定在创建它的 loop 上，且 OpenAI SDK 同步阻塞，直接跑在 web 的 loop 上会让一次提问把静态页面一起卡住。天地图 Key 只在渲染 `index.html` 时注入，不落盘、不入库。
 
 查询口径只有一处实现：`servers/geo_compute/query.py`。MCP Tool `query_nearby` 与 `scripts/ask_nearby.py` 都调用它，禁止在别处重写 SQL。
 
-空间自检器（`agent/selfcheck.py`）做五项检查：CRS、单位、几何有效性、量级自洽，以及**数值溯源**——最终回答里的每个数字都必须能在工具返回中找到出处。溯源不通过时循环会把回答打回重写（最多 2 轮）。实测模型确实会在叙述里自行估算两个设施之间的距离，只在提示词里禁止是不够的。
+空间自检器（`agent/selfcheck.py`）做五项检查：CRS、单位、几何有效性、量级自洽，以及**数值溯源**——最终回答里的每个数字都必须能在工具返回中找到出处。调用 `distance_between` 时额外做一次距离互证：UTM 平面距离与椭球面大地线距离必须互相印证（容差按舍入误差推导）。溯源不通过时循环会把回答打回重写（最多 2 轮）。实测模型确实会在叙述里自行估算两个设施之间的距离，只在提示词里禁止是不够的。
 
 辅助脚本：`calibrate_gcj02.py`（纠偏算法校准）、`check_boundaries.py`（边界完整性体检）、`analyze_poi_overlap.py`（点面重复量化）

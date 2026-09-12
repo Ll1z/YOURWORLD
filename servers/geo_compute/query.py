@@ -1,6 +1,12 @@
-"""geo-compute 的查询核心。
+"""geo_compute 的查询核心。
 
 供 MCP Tool 与命令行脚本共用，保证 SQL 与口径只有一处定义。
+
+中心点口径（重要）：
+    半径查询的中心必须是一个明确、可命名的位置（坐标或地名锚点），
+    和路径规划要先选起点是一个道理。禁止用行政区的几何代表点当圆心——
+    point_on_surface 只是几何产物，可能落在无人区，会让「某区 X 米内有什么」
+    这类问题产生看似合理实则无意义的 0 结果。
 """
 
 from __future__ import annotations
@@ -12,16 +18,31 @@ import duckdb
 import numpy as np
 import pandas as pd
 import shapely
-from pyproj import Transformer
+from pyproj import Geod, Transformer
 
 ROOT = Path(__file__).resolve().parents[2]
 DB = ROOT / "data" / "processed" / "geo.duckdb"
 SCOPE_FILE = ROOT / "servers" / "geo_knowledge" / "poi_scope.json"
 UTM = "EPSG:32650"
 DUP_M = 150.0
+# 各图层的字段列表：只有 poi_area 有面积列
+_TABLE_COLUMNS = {
+    "poi_point": ("osm_type", "osm_id", "name", "category_key", "category_value",
+                  "district", "lon", "lat", "NULL::DOUBLE AS area_m2"),
+    "poi_area": ("osm_type", "osm_id", "name", "category_key", "category_value",
+                 "district", "lon", "lat", "area_m2"),
+    "anchor": ("osm_type", "osm_id", "name", "category_key", "category_value",
+               "district", "lon", "lat", "NULL::DOUBLE AS area_m2"),
+}
+LAYERS = tuple(_TABLE_COLUMNS)
+
 TO_UTM = Transformer.from_crs("EPSG:4326", UTM, always_xy=True)
+GEOD = Geod(ellps="WGS84")
 
 _DIST = "sqrt((x_utm - q.x) * (x_utm - q.x) + (y_utm - q.y) * (y_utm - q.y))"
+
+_POI_COLUMNS = ("osm_type", "osm_id", "name", "category_key", "category_value",
+                "district", "lon", "lat")
 
 NEARBY_SQL = f"""
 WITH q AS (SELECT $qx AS x, $qy AS y)
@@ -43,6 +64,28 @@ SELECT district, category_value, count(*) AS n FROM (
   UNION ALL
   SELECT district, category_value FROM poi_area  WHERE {D}category_value IN ({CAT})
 ) GROUP BY 1, 2 ORDER BY 1, 3 DESC
+"""
+
+_PLACE_POOL = "\n  UNION ALL\n".join(
+    f"  SELECT '{table}' AS layer, {', '.join(cols)}\n  FROM {table} "
+    f"WHERE {{D}}name IS NOT NULL AND name <> ''"
+    for table, cols in _TABLE_COLUMNS.items()
+)
+
+PLACE_SQL = f"""
+WITH q AS (SELECT $kw AS kw),
+pool AS (
+{_PLACE_POOL}
+)
+SELECT pool.*,
+       CASE WHEN name = q.kw THEN 3 WHEN name LIKE q.kw || '%' THEN 2 ELSE 1 END AS match_score
+FROM pool, q
+WHERE name = q.kw OR name LIKE '%' || q.kw || '%'
+ORDER BY match_score DESC,
+         CASE pool.layer WHEN 'anchor' THEN 0 WHEN 'poi_area' THEN 1 ELSE 2 END,
+         CASE pool.category_key WHEN 'place' THEN 0 WHEN 'railway' THEN 1 ELSE 2 END,
+         length(name) ASC, name
+LIMIT $limit
 """
 
 
@@ -67,26 +110,38 @@ def connect(read_only: bool = True) -> duckdb.DuckDBPyConnection:
     return con
 
 
-def district_point_on_surface(name: str, con=None) -> tuple[float, float]:
-    own = con is None
-    con = con or connect()
-    try:
-        row = con.execute(
-            "SELECT ST_X(p) AS lon, ST_Y(p) AS lat FROM "
-            "(SELECT ST_PointOnSurface(geom) AS p FROM districts WHERE name = $name)",
-            {"name": name},
-        ).df()
-    finally:
-        if own:
-            con.close()
-    if row.empty:
-        raise ValueError(f"未找到区: {name}")
-    return float(row["lon"].iloc[0]), float(row["lat"].iloc[0])
+def normalize_nulls(df: pd.DataFrame) -> pd.DataFrame:
+    """把 DuckDB 返回的 NaN 归一为 None。
+
+    NULL 经 Arrow 转 pandas 会变成 float('nan')；nan 在 Python 里是真值且不是字符串，
+    既污染文本列，也会让下游 Pydantic 的 str | None 校验直接失败。
+    """
+    for col in ("name", "district", "category_key", "category_value", "osm_id", "osm_type"):
+        if col in df.columns:
+            df[col] = df[col].astype(object).where(df[col].notna(), None)
+    if "area_m2" in df.columns:
+        df["area_m2"] = df["area_m2"].astype(object).where(df["area_m2"].notna(), None)
+    return df
+
+
+def plain(record: dict) -> dict:
+    """把 numpy 标量转成原生 Python，便于直接进 JSON / pydantic。"""
+    out = {}
+    for key, value in record.items():
+        if isinstance(value, np.integer):
+            out[key] = int(value)
+        elif isinstance(value, np.floating):
+            out[key] = None if pd.isna(value) else float(value)
+        elif isinstance(value, float) and pd.isna(value):
+            out[key] = None
+        else:
+            out[key] = value
+    return out
 
 
 def nearby(lon: float, lat: float, radius_m: float = 1000.0,
            district: str | None = None, preset: str = "medical"):
-    """返回 (结果 DataFrame, 实际执行 SQL, 绑定参数)。"""
+    """返回 (结果 DataFrame, 实际执行 SQL, 绑定参数)。中心必须由调用方给定。"""
     cats = resolve_categories(preset)
     con = connect()
     try:
@@ -106,18 +161,60 @@ def nearby(lon: float, lat: float, radius_m: float = 1000.0,
     return normalize_nulls(df.sort_values("dist_m").reset_index(drop=True)), sql, params
 
 
-def normalize_nulls(df: pd.DataFrame) -> pd.DataFrame:
-    """把 DuckDB 返回的 NaN 归一为 None。
+def find_places(name: str, district: str | None = None, limit: int = 10):
+    """按名称检索可作锚点的地名（精确 > 前缀 > 包含），返回 (DataFrame, SQL, 参数)。"""
+    con = connect()
+    try:
+        sql = PLACE_SQL
+        params: dict = {"kw": name, "limit": int(limit)}
+        if district:
+            sql = sql.replace("{D}", "district = $district AND ")
+            params["district"] = district
+        else:
+            sql = sql.replace("{D}", "")
+        df = con.execute(sql, params).df()
+    finally:
+        con.close()
+    df = normalize_nulls(df)
+    df["ref"] = df["layer"] + "/" + df["osm_id"].astype(str)
+    return df, sql, params
 
-    NULL 经 Arrow 转 pandas 会变成 float('nan')；nan 在 Python 里是真值且不是字符串，
-    既污染文本列，也会让下游 Pydantic 的 str | None 校验直接失败。
-    """
-    for col in ("name", "district", "category_key", "category_value", "osm_id"):
-        if col in df.columns:
-            df[col] = df[col].astype(object).where(df[col].notna(), None)
-    if "area_m2" in df.columns:
-        df["area_m2"] = df["area_m2"].astype(object).where(df["area_m2"].notna(), None)
-    return df
+
+def resolve_ref(ref: str) -> dict:
+    """把 'poi_point/7591774161' 这样的引用解析成一条记录（含坐标）。"""
+    layer, _, osm_id = ref.partition("/")
+    if layer not in LAYERS or not osm_id:
+        raise ValueError(
+            f"引用格式应为 <layer>/<osm_id>，layer 取 {' 或 '.join(LAYERS)}；实际收到 {ref!r}"
+        )
+    con = connect()
+    try:
+        df = con.execute(
+            f"SELECT {', '.join(_TABLE_COLUMNS[layer])} FROM {layer} WHERE osm_id = $i",
+            {"i": osm_id},
+        ).df()
+    finally:
+        con.close()
+    if df.empty:
+        raise ValueError(f"库中找不到 {ref}")
+    record = plain(normalize_nulls(df).iloc[0].to_dict())
+    record.update({"ref": ref, "layer": layer})
+    return record
+
+
+def distance_between(a: dict, b: dict) -> dict:
+    """两点距离。同时给出 UTM 平面距离与椭球面大地线距离，两者互为印证。"""
+    ax, ay = TO_UTM.transform(a["lon"], a["lat"])
+    bx, by = TO_UTM.transform(b["lon"], b["lat"])
+    planar = float(np.hypot(bx - ax, by - ay))
+    azimuth, _, geodesic = GEOD.inv(a["lon"], a["lat"], b["lon"], b["lat"])
+    gap_pct = (abs(planar - geodesic) / geodesic * 100.0) if geodesic > 0 else 0.0
+    return {
+        "planar_distance_m": round(planar, 2),
+        "geodesic_distance_m": round(float(geodesic), 2),
+        "planar_vs_geodesic_pct": round(gap_pct, 4),
+        "bearing_deg": round(float(azimuth) % 360.0, 2),
+    }
 
 
 def find_duplicates(df: pd.DataFrame) -> list[dict]:

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ResourceNotFoundError
 
 from geo_knowledge.coords.gcj02 import gcj02_to_wgs84, wgs84_to_gcj02
 
@@ -38,9 +39,9 @@ def list_scopes() -> dict:
 @mcp.resource("knowledge://scope/{scope_id}", name="scope", description="按 id 读取口径定义全文")
 def get_scope(scope_id: str) -> dict:
     """读取指定口径的完整定义，包含默认取值、证据与已知局限。"""
-    p = KNOWLEDGE / f"{scope_id}.json"
-    if not p.exists():
-        raise ValueError(f"未登记的口径: {scope_id}")
+    p = next((q for q in KNOWLEDGE.glob("*.json") if q.stem == scope_id), None)
+    if p is None:
+        raise ResourceNotFoundError(f"未登记的口径: {scope_id}")
     return json.loads(p.read_text(encoding="utf-8"))
 
 

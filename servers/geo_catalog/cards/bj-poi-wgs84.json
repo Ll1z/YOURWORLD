@@ -3,18 +3,39 @@
   "name": "北京 POI 点层与面层（WGS84）",
   "description": "从 OSM 北京省级切片抽取的 POI，按方案 C 分点层与面层保存，保留原始几何与标签，计数口径由 servers/geo_knowledge/poi_scope.json 定义。",
   "spatial": {
-    "bbox": [113.6638, 39.3270, 117.7519, 41.3677],
+    "bbox": [
+      113.6638,
+      39.327,
+      117.7519,
+      41.3677
+    ],
     "note": "覆盖整份 OSM 提取范围；district 字段标注所属区，五区外为 null"
   },
   "temporal": {
     "derived_at": "2026-09-12",
     "upstream": "OSM 2026-09-11"
   },
-  "crs": {"epsg": 4326, "name": "WGS84"},
+  "crs": {
+    "epsg": 4326,
+    "name": "WGS84"
+  },
   "format": {
-    "files": ["data/processed/poi_point.gpkg", "data/processed/poi_area.gpkg"],
-    "layers": ["poi_point", "poi_area"],
-    "build_script": "scripts/build_poi.py"
+    "files": [
+      "data/processed/poi_point.gpkg",
+      "data/processed/poi_area.gpkg",
+      "data/processed/anchors.gpkg"
+    ],
+    "layers": [
+      "poi_point",
+      "poi_area",
+      "anchor"
+    ],
+    "build_script": "scripts/build_poi.py",
+    "layer_roles": {
+      "poi_point": "点状 POI（OSM node），回答「这里有什么设施」",
+      "poi_area": "面状 POI（OSM way/relation），与点层互为补充，同样回答「有什么设施」",
+      "anchor": "定位锚点：带名称的地名与车站，回答「这个地方叫什么、在哪」，供半径查询选中心用"
+    }
   },
   "schema": {
     "osm_type": "node / way / relation",
@@ -26,7 +47,8 @@
     "other_tags": "原始 HSTORE 标签串，完整保留全部标签",
     "geometry": "点层为 Point；面层为 Polygon / MultiPolygon",
     "rep_x / rep_y": "仅面层：代表点经纬度（point_on_surface，保证落在多边形内）",
-    "area_m2": "仅面层：大地线面积，平方米"
+    "area_m2": "仅面层：大地线面积，平方米",
+    "anchor 层": "字段为 osm_type / osm_id / name / category_key / category_value / district / lon / lat；category_key 取 place / railway / highway / public_transport"
   },
   "units": {
     "coordinates": "十进制度 (WGS84)",
@@ -40,12 +62,35 @@
     "attribution": "© OpenStreetMap contributors"
   },
   "sample_rows": [
-    {"layer": "poi_point", "osm_id": "8985515592", "name": "白纸坊街道", "category_key": "amenity", "category_value": "townhall", "district": "西城区"}
+    {
+      "layer": "poi_point",
+      "osm_id": "8985515592",
+      "name": "白纸坊街道",
+      "category_key": "amenity",
+      "category_value": "townhall",
+      "district": "西城区"
+    }
   ],
   "counts": {
-    "poi_point": {"total": 25921, "in_5_districts": 16467},
-    "poi_area": {"total": 26657, "in_5_districts": 13085},
-    "note": "点层含 POI 标签的占 points 图层 16.3%；面层占 multipolygons 的 12.8%"
+    "poi_point": {
+      "total": 25921,
+      "in_5_districts": 16467
+    },
+    "poi_area": {
+      "total": 26657,
+      "in_5_districts": 13085
+    },
+    "note": "点层含 POI 标签的占 points 图层 16.3%；面层占 multipolygons 的 12.8%",
+    "anchor": {
+      "total": 31119,
+      "in_5_districts": 9891,
+      "breakdown": {
+        "highway": 22247,
+        "place": 7840,
+        "railway": 983,
+        "public_transport": 49
+      }
+    }
   },
   "known_pitfalls": [
     "GDAL 的 OSM multipolygons 层把要素 id 拆成两个互斥字段：来自 relation 的填 osm_id，来自闭合 way 的填 osm_way_id（实测 208706 行中 osm_id 非空 2261、osm_way_id 非空 206445、两者同时非空 0）。只读 osm_id 会让 99% 的面要素丢失身份。必须 coalesce，实现见 scripts/build_poi.py 的 polygon_identity；此坑在 2026-09-12 修复前污染过一版 poi_area。",
@@ -58,6 +103,8 @@
     "点面并存导致的重复计数实测约 2.6%，采取「不去重」口径，理由见 servers/geo_knowledge/poi_scope.json。",
     "只用点层会漏掉一半以上医院：东城区医院类仅点层 11 个，点面并集 34 个。",
     "POI 名称缺失率不低，按名称聚合不可靠。",
-    "数据完整性取决于 OSM 志愿者，结论须表述为「OSM 数据显示」。"
+    "数据完整性取决于 OSM 志愿者，结论须表述为「OSM 数据显示」。",
+    "POI 层的 PRIORITY 不含 place / railway / highway，因此「中关村」这类地名节点与地铁站、公交站会被 POI 层整体丢掉。这正是锚点层单独存在的理由：POI 层答「有什么」，锚点层答「在哪」。",
+    "锚点只取点层。线状站台与面状地名不在锚点层内；用车站名定位时优先命中 node 级的 station / subway_entrance。"
   ]
 }

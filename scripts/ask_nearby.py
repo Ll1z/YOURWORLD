@@ -1,7 +1,10 @@
-"""端到端查询：某点周围指定半径内有哪些 POI。
+"""端到端查询：某个明确位置周围指定半径内有哪些 POI。
 
 产出物固定包含数据来源、CRS 声明、计算方法、可复现 SQL 与结果文件，
 对应 HANDOFF.md 的 Stage 1 验收标准形态。
+
+中心点口径：必须由调用方给出。可以用 --lon/--lat 直接给坐标，也可以用 --anchor 给地名
+再由脚本解析成坐标；脚本不会替你猜一个几何代表点当圆心，理由见 knowledge://scope/anchor_scope。
 
 查询核心复用 geo_compute.query，与 MCP Tool 共用同一份 SQL 与口径，避免两处定义漂移。
 """
@@ -17,11 +20,38 @@ from geo_compute import query
 
 DUP_M = query.DUP_M
 
+NO_CENTER = (
+    "半径查询必须给出明确的查询中心：\n"
+    "  --lon 116.4074 --lat 39.9042        直接给坐标\n"
+    "  --anchor \"王府井\"                     给地名，由脚本用 find_places 解析\n"
+    "若你想知道的是某个区的总量（不需要中心），请改用汇总统计。"
+)
+
+
+def resolve_center(args) -> tuple[float, float, str, list[dict]]:
+    if args.lon is not None and args.lat is not None:
+        return args.lon, args.lat, "命令行给定坐标", []
+
+    if not args.anchor:
+        raise SystemExit(NO_CENTER)
+
+    df, _, _ = query.find_places(args.anchor, args.district, limit=5)
+    if df.empty:
+        scope = f"（限 {args.district}）" if args.district else ""
+        raise SystemExit(f"在库中找不到与「{args.anchor}」匹配的地名{scope}，请换个关键词或直接给坐标。")
+
+    candidates = [query.plain(r) for r in df.to_dict("records")]
+    best = candidates[0]
+    source = (f"地名解析：{best['name']}（{best['ref']}，"
+              f"{best['category_value'] or best['layer']}，{best.get('district') or '五区外'}）")
+    return best["lon"], best["lat"], source, candidates
+
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--lon", type=float)
     ap.add_argument("--lat", type=float)
+    ap.add_argument("--anchor", default=None, help="地名关键词，用 find_places 解析成坐标")
     ap.add_argument("--district", default=None, help="限定区名；省略则不限")
     ap.add_argument("--radius", type=float, default=1000.0, help="半径（米，直线距离）")
     ap.add_argument("--preset", default="medical", help="口径预设，见 poi_scope.json")
@@ -34,15 +64,7 @@ def main():
     except ValueError as e:
         raise SystemExit(str(e)) from e
 
-    if args.lon is None or args.lat is None:
-        if not args.district:
-            raise SystemExit("需给出 --lon/--lat，或给出 --district 以使用该区代表点作中心")
-        lon, lat = query.district_point_on_surface(args.district)
-        center_src = f"{args.district}边界的 point_on_surface（脚本自动选取）"
-    else:
-        lon, lat = args.lon, args.lat
-        center_src = "命令行给定"
-
+    lon, lat, center_src, candidates = resolve_center(args)
     df, sql, params = query.nearby(lon, lat, args.radius, args.district, args.preset)
 
     gdf = gpd.GeoDataFrame(df.drop(columns=["wkt"]).copy(),
@@ -80,12 +102,25 @@ def main():
     lines.append(f"| 范围限定 | {scope_txt} |")
     lines.append(f"| 类别预设 | {args.preset} = {cats} |")
     lines.append("")
+    if candidates:
+        lines.append("## 地名解析候选")
+        lines.append("")
+        lines.append("脚本按「精确 > 前缀 > 包含」排序，取第一条作为查询中心。全部候选：")
+        lines.append("")
+        lines.append("| ref | 名称 | 类别 | 所属区 | 匹配分 | 经度 | 纬度 |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for c in candidates:
+            lines.append(f"| {c['ref']} | {c['name']} | {c['category_value'] or c['layer']} | "
+                         f"{c.get('district') or '五区外'} | {c['match_score']} | "
+                         f"{c['lon']:.6f} | {c['lat']:.6f} |")
+        lines.append("")
     lines.append("## 数据来源")
     lines.append("")
     lines.append("- POI 与行政边界：OpenStreetMap 北京省级切片，2026-09-11（ODbL 1.0，(c) OpenStreetMap contributors）")
     lines.append("- 边界数据：cn-bj-adm5-wgs84（东城/朝阳/丰台/海淀 取自 OSM，西城区由 DataV 边界经 GCJ-02 纠偏补齐）")
     lines.append("- 数据卡片：servers/geo_catalog/cards/")
-    lines.append(f"- 口径定义：servers/geo_knowledge/poi_scope.json（版本 {scope['version']}）")
+    lines.append(f"- 口径定义：servers/geo_knowledge/poi_scope.json（版本 {scope['version']}）、"
+                 "servers/geo_knowledge/anchor_scope.json（中心点口径）")
     lines.append("- 查询实现：servers/geo_compute/query.py（与 MCP Tool query_nearby 同一份 SQL）")
     lines.append("")
     lines.append("## CRS 与单位声明")
@@ -150,6 +185,7 @@ def main():
     lines.append("- OSM 数据完备性取决于志愿者测绘，结论应表述为「OSM 数据显示」")
     lines.append("- 面层以代表点参与距离计算，与设施实际入口可能存在偏差")
     lines.append("- 点面并集存在双挂噪声（同一设施点面同时测绘），见「疑似重复」一节")
+    lines.append("- 结果只覆盖圆心周围该半径，不代表整个行政区")
     report = "\n".join(lines) + "\n"
     with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as f:
         f.write(report)

@@ -31,6 +31,7 @@ CONTEXT_RESOURCES: list[tuple[str, str]] = [
     ("geo_compute", "compute://schema"),
     ("geo_catalog", "catalog://datasets"),
     ("geo_knowledge", "knowledge://scope/poi_scope"),
+    ("geo_knowledge", "knowledge://scope/anchor_scope"),
     ("geo_knowledge", "knowledge://coords/systems"),
 ]
 

@@ -22,11 +22,13 @@ SYSTEM_PROMPT = """你是 GeoAnalyst，一个地理空间分析 Agent。当前�
 硬性规则，任何情况下都不得违背：
 1. 所有数值（数量、距离、面积、排名）只能来自工具返回。禁止自己计算、估算或凭常识填写。
 2. 先给结论，再给依据，依据至少包含：数据来源、CRS、口径、方法与局限。
-3. 涉及「有哪些 / 有多少」时，必须同时考虑点层与面层——只用点层会漏掉一半以上的医院。
-4. 结论一律表述为「OSM 数据显示」，因为 OSM 的完备性取决于志愿者测绘。
-5. 距离是 UTM 平面下的直线距离，不是路网可达距离，不得据此下可达性结论。
-6. 工具报错时最多换一次参数重试；仍失败就如实说明失败原因，不要绕过。
-7. 现有工具答不了的问题，直接说明缺什么数据或工具，不要编造。
+3. 半径查询必须先有一个明确、可命名的中心，和路径规划要先选起点是一个道理。顺序是：用户在问题里给了地点就先用 find_places 把它解析成坐标；只给了区名加半径就先追问以哪里为中心。禁止用行政区的几何代表点当圆心。
+4. 涉及「有哪些 / 有多少」时，必须同时考虑点层与面层——只用点层会漏掉一半以上的医院。
+5. 结论一律表述为「OSM 数据显示」，因为 OSM 的完备性取决于志愿者测绘。
+6. 距离是 UTM 平面下的直线距离，不是路网可达距离，不得据此下可达性结论。
+7. 「A 和 B 相距多远」必须调 distance_between 计算，不要拿坐标自行估算。
+8. 工具报错时最多换一次参数重试；仍失败就如实说明失败原因，不要绕过。
+9. 现有工具答不了的问题，直接说明缺什么数据或工具，不要编造。
 
 请用中文回答。"""
 
@@ -206,33 +208,151 @@ def _repair_ungrounded(
     return answer, max_rounds
 
 
+HINT_VERSION = 2
+
+
 def build_visual_hints(run_result: AgentRun) -> dict:
-    """为 Cesium 前端预留的结构化提示。Stage 1 只落盘，不渲染。"""
-    last = next((i for i in reversed(run_result.invocations)
-                 if i.ok and i.name == "query_nearby" and i.result.get("hits") is not None), None)
-    if last is None:
-        return {"camera": None, "markers": [], "note": "本次运行没有产生可定位的空间结果（未调用 query_nearby）"}
-    payload = last.result
+    """为 Cesium 前端生成结构化提示：相机飞向哪里、标记什么、连线哪两点。
+
+    后端只描述「看什么」，不描述「怎么画」——Cesium 版本升级不该改到 Python。
+    三种可定位结果按特异性排序：两点距离 > 半径查询 > 地名候选。
+    """
+
+    def last_ok(tool: str):
+        return next((i for i in reversed(run_result.invocations) if i.ok and i.name == tool), None)
+
+    hints = {
+        "version": HINT_VERSION,
+        "question": run_result.question,
+        "kind": "none",
+        "camera": None,
+        "markers": [],
+        "path": None,
+        "radius_m": None,
+        "note": "本次运行没有产生可定位的空间结果",
+    }
+
+    distance = last_ok("distance_between")
+    if distance is not None and distance.result.get("a") and distance.result.get("b"):
+        a, b = distance.result["a"], distance.result["b"]
+        # 相机取两端点中点。这只决定「看向哪里」，不参与任何对外报告的数字，
+        # 因此用经纬度均值即可，公里尺度上与椭球面中点的差异远小于相机精度。
+        hints.update({
+            "kind": "distance",
+            "camera": {
+                "lon": (a["lon"] + b["lon"]) / 2.0,
+                "lat": (a["lat"] + b["lat"]) / 2.0,
+                "height_m": max(float(distance.result.get("geodesic_distance_m") or 0.0) * 3.0,
+                                1500.0),
+                "heading_deg": 0.0,
+                "pitch_deg": -60.0,
+            },
+            "path": [[a["lon"], a["lat"]], [b["lon"], b["lat"]]],
+            "markers": [_endpoint_marker("a", a), _endpoint_marker("b", b)],
+            "note": "camera 取两端点中点俯视，path 是两点连线，markers 标出两端点。",
+        })
+        return hints
+
+    nearby = last_ok("query_nearby")
+    if nearby is not None and nearby.result.get("hits") is not None:
+        payload = nearby.result
+        hints.update({
+            "kind": "nearby",
+            "camera": {
+                "lon": payload["center_lon"],
+                "lat": payload["center_lat"],
+                "height_m": max(payload["radius_m"] * 4.0, 2000.0),
+                "heading_deg": 0.0,
+                "pitch_deg": -60.0,
+            },
+            "radius_m": payload["radius_m"],
+            "markers": [
+                {
+                    "id": "center",
+                    "lon": payload["center_lon"],
+                    "lat": payload["center_lat"],
+                    "label": "查询中心",
+                    "kind": "center",
+                    "source": payload.get("center_source"),
+                },
+                *[
+                    {
+                        "id": f"{h['layer']}/{h['osm_id']}",
+                        "lon": h["lon"],
+                        "lat": h["lat"],
+                        "label": h.get("name") or "(无名)",
+                        "kind": h["layer"],
+                        "category": h["category_value"],
+                        "dist_m": h["dist_m"],
+                        "area_m2": h.get("area_m2"),
+                    }
+                    for h in payload["hits"]
+                ],
+            ],
+            "note": "camera 飞向查询中心，markers 标记半径内命中，radius_m 供前端画范围圈。",
+        })
+        return hints
+
+    places = last_ok("find_places")
+    records = _records(places.result) if places is not None else []
+    if records:
+        top = records[0]
+        hints.update({
+            "kind": "places",
+            "camera": {
+                "lon": top["lon"],
+                "lat": top["lat"],
+                "height_m": 4000.0,
+                "heading_deg": 0.0,
+                "pitch_deg": -60.0,
+            },
+            "markers": [
+                {
+                    "id": r["ref"],
+                    "lon": r["lon"],
+                    "lat": r["lat"],
+                    "label": r.get("name") or "(无名)",
+                    "kind": r["layer"],
+                    "ref": r["ref"],
+                    "category": r.get("category_value"),
+                    "district": r.get("district"),
+                }
+                for r in records
+            ],
+            "note": "camera 飞向匹配度最高的候选，markers 列出全部候选，供人工确认中心点。",
+        })
+        return hints
+
+    hints["note"] = ("本次运行没有产生可定位的空间结果"
+                     "（未调用 query_nearby / distance_between / find_places）")
+    return hints
+
+
+def _records(payload: Any) -> list[dict]:
+    """取工具返回里的记录列表。
+
+    MCP 对返回 list 的工具（find_places / list_districts）会包一层 {"result": [...]}，
+    返回单个模型实例的工具则是扁平字典，这里把两种形状归一。
+    """
+    if isinstance(payload, list):
+        return [r for r in payload if isinstance(r, dict)]
+    if isinstance(payload, dict):
+        for key in ("hits", "result"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [r for r in value if isinstance(r, dict)]
+    return []
+
+
+def _endpoint_marker(tag: str, endpoint: dict) -> dict:
     return {
-        "camera": {
-            "lon": payload["center_lon"],
-            "lat": payload["center_lat"],
-            "height_m": max(payload["radius_m"] * 4, 2000.0),
-            "heading_deg": 0.0,
-            "pitch_deg": -60.0,
-        },
-        "radius_m": payload["radius_m"],
-        "markers": [
-            {
-                "id": f"{h['layer']}/{h['osm_id']}",
-                "lon": h["lon"],
-                "lat": h["lat"],
-                "label": h.get("name") or "(无名)",
-                "category": h["category_value"],
-                "dist_m": h["dist_m"],
-                "area_m2": h.get("area_m2"),
-            }
-            for h in payload["hits"]
-        ],
-        "note": "为 Cesium 前端预留：camera 飞向该点，markers 标记附近内容。Stage 1 不渲染。",
+        "id": f"endpoint-{tag}",
+        "lon": endpoint["lon"],
+        "lat": endpoint["lat"],
+        "label": endpoint.get("label") or tag,
+        "kind": "endpoint",
+        "ref": endpoint.get("ref"),
+        "layer": endpoint.get("layer"),
+        "category": endpoint.get("category_value"),
+        "district": endpoint.get("district"),
     }

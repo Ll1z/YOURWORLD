@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GeoAnalyst · 地理空间分析</title>
+<script>window.CESIUM_BASE_URL = "{{CESIUM_BASE}}";</script>
+<link rel="stylesheet" href="{{CESIUM_BASE}}Widgets/widgets.css">
+<script src="{{CESIUM_BASE}}Cesium.js"></script>
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: #111a2b;
+    --panel-2: #16233a;
+    --line: #24344f;
+    --text: #e6edf7;
+    --muted: #8fa3bf;
+    --ok: #4ade80;
+    --bad: #f87171;
+    --accent: #4cc9f0;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif; }
+  #globe { position: absolute; inset: 0 420px 0 0; }
+  #panel { position: absolute; top: 0; right: 0; width: 420px; height: 100%;
+    background: var(--panel); border-left: 1px solid var(--line);
+    display: flex; flex-direction: column; }
+  #panel header { padding: 14px 16px 10px; border-bottom: 1px solid var(--line); }
+  #panel h1 { margin: 0; font-size: 16px; letter-spacing: .5px; }
+  #panel header p { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+  #scroll { flex: 1; overflow-y: auto; padding: 12px 16px 24px; }
+  section { margin-bottom: 16px; }
+  section > h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+  textarea { width: 100%; min-height: 60px; resize: vertical; padding: 9px 10px;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; font: inherit; font-size: 13px; }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  button { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.primary { background: #1d6fa5; border-color: #2b8ccd; }
+  button:disabled { opacity: .5; cursor: progress; }
+  .chip { padding: 4px 9px; font-size: 12px; border-radius: 999px;
+    border: 1px dashed var(--line); background: transparent; color: var(--muted); }
+  .chip:hover { color: var(--text); border-color: var(--accent); }
+  #status { font-size: 12px; color: var(--muted); min-height: 18px; }
+  #status.err { color: var(--bad); }
+  #answer { font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+  #answer:empty::before { content: "还没有提问。"; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line);
+    vertical-align: top; word-break: break-word; }
+  th { color: var(--muted); font-weight: 500; }
+  td.pass { color: var(--ok); } td.fail { color: var(--bad); }
+  .inv { border-left: 2px solid var(--line); padding: 6px 0 6px 10px; margin-bottom: 8px; font-size: 12px; }
+  .inv.ok { border-left-color: var(--ok); } .inv.err { border-left-color: var(--bad); }
+  .inv code { color: var(--accent); }
+  .inv .meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .runs li { list-style: none; padding: 6px 8px; margin-bottom: 4px; border-radius: 6px;
+    background: var(--panel-2); font-size: 12px; cursor: pointer; border: 1px solid transparent; }
+  .runs li:hover { border-color: var(--accent); }
+  .runs ul { margin: 0; padding: 0; }
+  .runs .meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  details { font-size: 12px; }
+  details summary { cursor: pointer; color: var(--muted); }
+  pre { white-space: pre-wrap; word-break: break-word; background: var(--panel-2);
+    padding: 10px; border-radius: 8px; font-size: 11px; line-height: 1.55;
+    max-height: 320px; overflow: auto; border: 1px solid var(--line); }
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
+  #hover { position: absolute; pointer-events: none; padding: 7px 10px; font-size: 12px;
+    background: rgba(11,18,32,.94); border: 1px solid var(--accent); border-radius: 8px;
+    max-width: 260px; line-height: 1.5; z-index: 9; }
+  #hover .meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  #banner { margin: 10px 16px 0; padding: 8px 10px; border-radius: 8px; font-size: 12px;
+    background: #3a1d24; border: 1px solid #7f2b3a; color: #ffc9d2; display: none; }
+</style>
+</head>
+<body>
+<div id="globe"></div>
+<div id="hover" hidden></div>
+
+<aside id="panel">
+  <header>
+    <h1>GeoAnalyst</h1>
+    <p>OpenStreetMap 北京五区（东城 / 西城 / 朝阳 / 丰台 / 海淀）· 距离与缓冲 EPSG:32650</p>
+  </header>
+  <div id="banner"></div>
+  <div id="scroll">
+
+    <section>
+      <h2>提问</h2>
+      <textarea id="q" placeholder="例如：海淀区中关村附近 800 米内有哪些便利店或超市？"></textarea>
+      <div class="row">
+        <button id="ask" class="primary">提问</button>
+        <button class="chip" data-q="海淀区中关村附近 800 米内有哪些便利店或超市？">中关村 800 米便利店</button>
+        <button class="chip" data-q="北京协和医院和王府井相距多远？">协和 ↔ 王府井</button>
+        <button class="chip" data-q="海淀区 800 米内有哪些便利店？">缺中心的提问</button>
+      </div>
+      <div class="row"><span id="status"></span></div>
+    </section>
+
+    <section>
+      <h2>结论</h2>
+      <div id="answer"></div>
+    </section>
+
+    <section>
+      <h2>空间自检</h2>
+      <table id="checks"><tbody><tr><td colspan="3" style="color:var(--muted)">尚未运行</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>工具调用轨迹</h2>
+      <div id="trace" style="color:var(--muted);font-size:12px">尚未运行</div>
+    </section>
+
+    <section>
+      <h2>地图</h2>
+      <div class="row">
+        <button id="base-vec">矢量底图</button>
+        <button id="base-img">影像底图</button>
+        <button id="replay">回到结果视角</button>
+        <button id="clear">清空标记</button>
+      </div>
+      <div class="row"><label style="font-size:12px;color:var(--muted)">
+        <input type="checkbox" id="show-labels" checked> 显示名称</label></div>
+      <div class="row legend">
+        <span><i style="background:#ffd166"></i>查询中心</span>
+        <span><i style="background:#ff7b54"></i>距离端点</span>
+        <span><i style="background:#4cc9f0"></i>地名锚点</span>
+        <span><i style="background:#58c4dd"></i>点状 POI</span>
+        <span><i style="background:#b39ddb"></i>面状 POI</span>
+      </div>
+      <div class="row" style="color:var(--muted);font-size:11px" id="hint-note"></div>
+    </section>
+
+    <section>
+      <h2>历史运行</h2>
+      <div class="runs"><ul id="runs"><li style="color:var(--muted)">加载中…</li></ul></div>
+    </section>
+
+    <section>
+      <h2>报告</h2>
+      <details>
+        <summary>展开完整报告（report.md）</summary>
+        <pre id="report">尚未生成。</pre>
+      </details>
+    </section>
+
+  </div>
+</aside>
+
+<script>
+const CESIUM_BASE = "{{CESIUM_BASE}}";
+const TIANDITU_KEY = "{{TIANDITU_KEY}}";
+
+// 天地图 w 矩阵集的第一个标识符 "1" 就是 2x2 瓦片（等价 Web Mercator z=1），
+// 而 Cesium 的 level 0 是 1x1，两边差一位。所以必须按 level 索引显式给标签，
+// 并配 minimumLevel=1：level n -> 天地图 id n。用默认标签（w:n）会直接错位。
+const TDT_LABELS = ['1'];
+for (let z = 1; z <= 18; z++) TDT_LABELS[z] = String(z);
+
+const COLOR = {
+  center: '#ffd166', endpoint: '#ff7b54', anchor: '#4cc9f0',
+  poi_point: '#58c4dd', poi_area: '#b39ddb', other: '#9ad1d4',
+};
+const CHECK_LABEL = {
+  crs: '坐标系', units: '单位', geometry: '几何', magnitude: '量级',
+  grounding: '数值溯源', distance: '距离互证',
+};
+
+const viewer = new Cesium.Viewer('globe', {
+  baseLayer: false,            // 不加载默认 Ion 底图，避免多余的在线请求
+  baseLayerPicker: false, geocoder: false, homeButton: false,
+  sceneModePicker: false, navigationHelpButton: false,
+  animation: false, timeline: false, fullscreenButton: false,
+  infoBox: false, selectionIndicator: false,
+});
+viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#0a1420');
+
+const TDT_CREDIT = new Cesium.Credit('天地图 · 国家地理信息公共服务平台');
+
+function tdtLayer(id) {
+  return new Cesium.WebMapTileServiceImageryProvider({
+    url: 'https://t{s}.tianditu.gov.cn/' + id + '_w/wmts'
+       + '?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0'
+       + '&LAYER=' + id + '&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles'
+       + '&TILEMATRIX={TileMatrix}&TILEROW={TileRow}&TILECOL={TileCol}'
+       + '&tk=' + TIANDITU_KEY,
+    layer: id, style: 'default', format: 'tiles', tileMatrixSetID: 'w',
+    subdomains: ['0', '1', '2', '3', '4', '5', '6', '7'],
+    tileMatrixLabels: TDT_LABELS,
+    minimumLevel: 1, maximumLevel: 18,
+    credit: TDT_CREDIT,
+  });
+}
+
+function setBase(kind) {
+  viewer.imageryLayers.removeAll();
+  const ids = kind === 'img' ? ['img', 'cia'] : ['vec', 'cva'];
+  ids.forEach((id) => viewer.imageryLayers.addImageryProvider(tdtLayer(id)));
+}
+setBase('vec');
+
+const HOME = { lon: 116.40, lat: 39.93, height_m: 90000, heading_deg: 0, pitch_deg: -70 };
+const pinIndex = new Map();
+const hoverBox = document.getElementById('hover');
+const hintNote = document.getElementById('hint-note');
+let lastHints = null;
+let showLabels = true;
+
+function flyTo(cam) {
+  if (!cam) return;
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(cam.lon, cam.lat, cam.height_m),
+    orientation: {
+      heading: Cesium.Math.toRadians(cam.heading_deg || 0),
+      pitch: Cesium.Math.toRadians(cam.pitch_deg ?? -60),
+      roll: 0,
+    },
+    duration: 2.0,
+  });
+}
+
+// 取景必须先包围内容、再摆姿态：只把相机放到目标点正上方，目标会落在视野下边缘，
+// 俯视 60 度时它恰好等于垂直半视角，结果就是被底部版权条压住看不见。
+function flyToHints(h) {
+  const cam = h && h.camera;
+  const markers = (h && h.markers) || [];
+  const sphere = markers.length
+    ? Cesium.BoundingSphere.fromPoints(
+        markers.map((m) => Cesium.Cartesian3.fromDegrees(m.lon, m.lat)))
+    : null;
+  if (sphere && (sphere.radius > 1 || h.radius_m)) {
+    sphere.radius = Math.max(sphere.radius * 1.35, (h.radius_m || 0) * 1.2, 150);
+    viewer.camera.flyToBoundingSphere(sphere, {
+      offset: new Cesium.HeadingPitchRange(
+        Cesium.Math.toRadians((cam && cam.heading_deg) || 0),
+        Cesium.Math.toRadians((cam && cam.pitch_deg) ?? -60),
+        0),
+      duration: 2.0,
+    });
+    return;
+  }
+  flyTo(cam);
+}
+
+function clearScene() {
+  viewer.entities.removeAll();
+  pinIndex.clear();
+  hoverBox.hidden = true;
+}
+
+function addMarker(m) {
+  const color = Cesium.Color.fromCssColorString(COLOR[m.kind] || COLOR.other);
+  const isCenter = m.kind === 'center';
+  viewer.entities.add({
+    id: m.id,
+    position: Cesium.Cartesian3.fromDegrees(m.lon, m.lat),
+    point: {
+      pixelSize: isCenter ? 15 : 10, color,
+      outlineColor: Cesium.Color.WHITE.withAlpha(0.9), outlineWidth: 1.5,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+    label: {
+      text: (isCenter ? '◎ ' : '') + (m.label || '(无名)'),
+      font: '500 13px "Microsoft YaHei", sans-serif',
+      fillColor: Cesium.Color.WHITE,
+      outlineColor: Cesium.Color.fromCssColorString('#0b1220'),
+      outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      pixelOffset: new Cesium.Cartesian2(0, -18),
+      show: showLabels,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      scaleByDistance: new Cesium.NearFarScalar(500, 1.0, 40000, 0.0),
+    },
+  });
+  pinIndex.set(m.id, m);
+}
+
+function applyHints(h) {
+  clearScene();
+  lastHints = h;
+  if (!h) { hintNote.textContent = ''; return; }
+
+  (h.markers || []).forEach(addMarker);
+
+  if (h.radius_m && h.camera) {
+    viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(h.camera.lon, h.camera.lat),
+      ellipse: {
+        semiMajorAxis: h.radius_m, semiMinorAxis: h.radius_m, height: 0,
+        material: Cesium.Color.fromCssColorString(COLOR.anchor).withAlpha(0.10),
+        outline: true,
+        outlineColor: Cesium.Color.fromCssColorString(COLOR.anchor).withAlpha(0.85),
+      },
+    });
+  }
+
+  if (h.path && h.path.length >= 2) {
+    viewer.entities.add({
+      polyline: {
+        positions: h.path.map((p) => Cesium.Cartesian3.fromDegrees(p[0], p[1])),
+        width: 3, clampToGround: false,
+        material: Cesium.Color.fromCssColorString(COLOR.endpoint),
+      },
+    });
+  }
+
+  flyToHints(h);
+  hintNote.textContent = h.note || '';
+}
+
+function showHover(m, position) {
+  const bits = [];
+  if (m.category) bits.push(m.category);
+  if (m.dist_m != null) bits.push('距中心 ' + m.dist_m + ' m');
+  if (m.area_m2 != null) bits.push('面积 ' + Math.round(m.area_m2).toLocaleString() + ' m²');
+  if (m.district) bits.push(m.district);
+  if (m.ref) bits.push(m.ref);
+  hoverBox.innerHTML = '';
+  const title = document.createElement('div');
+  title.textContent = m.label || '(无名)';
+  hoverBox.appendChild(title);
+  if (bits.length) {
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = bits.join(' · ');
+    hoverBox.appendChild(meta);
+  }
+  hoverBox.style.left = (position.x + 16) + 'px';
+  hoverBox.style.top = (position.y + 12) + 'px';
+  hoverBox.hidden = false;
+}
+
+viewer.screenSpaceEventHandler.setInputAction((movement) => {
+  const picked = viewer.scene.pick(movement.endPosition);
+  const m = picked && picked.id ? pinIndex.get(picked.id) : null;
+  if (m) showHover(m, movement.endPosition); else hoverBox.hidden = true;
+}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+const $ = (id) => document.getElementById(id);
+
+function setStatus(text, isError) {
+  const el = $('status');
+  el.textContent = text || '';
+  el.className = isError ? 'err' : '';
+}
+
+function renderChecks(checks) {
+  const body = $('checks').tBodies[0];
+  body.innerHTML = '';
+  if (!checks || !checks.length) {
+    body.innerHTML = '<tr><td colspan="3" style="color:var(--muted)">无自检结果</td></tr>';
+    return;
+  }
+  checks.forEach((c) => {
+    const tr = document.createElement('tr');
+    const name = document.createElement('td');
+    name.textContent = CHECK_LABEL[c.name] || c.name;
+    const state = document.createElement('td');
+    state.textContent = c.passed ? '通过' : '未通过';
+    state.className = c.passed ? 'pass' : 'fail';
+    const detail = document.createElement('td');
+    detail.textContent = c.detail || '';
+    tr.append(name, state, detail);
+    body.appendChild(tr);
+  });
+}
+
+function renderTrace(invocations) {
+  const box = $('trace');
+  box.innerHTML = '';
+  if (!invocations || !invocations.length) {
+    box.textContent = '本次未调用任何工具';
+    return;
+  }
+  invocations.forEach((inv, k) => {
+    const div = document.createElement('div');
+    div.className = 'inv ' + (inv.ok ? 'ok' : 'err');
+    const head = document.createElement('div');
+    head.textContent = (k + 1) + '. ' + inv.server + ' · ' + inv.name;
+    const args = document.createElement('div');
+    args.className = 'meta';
+    args.textContent = JSON.stringify(inv.arguments);
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = '@' + inv.elapsed_s + 's · ' + (inv.ok ? '成功' : '失败：' + inv.error);
+    div.append(head, args, meta);
+    box.appendChild(div);
+  });
+}
+
+function render(data) {
+  $('answer').textContent = data.answer || '（模型未给出回答）';
+  renderChecks(data.checks);
+  renderTrace(data.invocations);
+  $('report').textContent = data.report || '（无报告）';
+  applyHints(data.visual_hints);
+  const verdict = data.passed ? '自检全部通过' : '自检未全部通过';
+  setStatus('#' + data.run_id + ' · ' + data.steps + ' 步 · ' + verdict
+            + ' · 数值溯源修复 ' + data.repair_rounds + ' 轮', !data.passed);
+}
+
+async function ask() {
+  const question = $('q').value.trim();
+  if (!question) { setStatus('请先输入问题', true); return; }
+  const btn = $('ask');
+  btn.disabled = true;
+  setStatus('Agent 运行中，通常 20–60 秒…');
+  try {
+    const res = await fetch('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+    render(data);
+    loadRuns();
+  } catch (e) {
+    setStatus('失败：' + e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadRuns() {
+  const list = $('runs');
+  try {
+    const runs = await (await fetch('/api/runs')).json();
+    list.innerHTML = '';
+    if (!runs.length) {
+      list.innerHTML = '<li style="color:var(--muted)">还没有历史运行</li>';
+      return;
+    }
+    runs.slice(0, 20).forEach((r) => {
+      const li = document.createElement('li');
+      const title = document.createElement('div');
+      title.textContent = r.question || '(未记录问题)';
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = r.id + ' · 标记 ' + r.marker_count
+                       + (r.has_camera ? ' · 有视角' : '');
+      li.append(title, meta);
+      li.onclick = () => replay(r.id);
+      list.appendChild(li);
+    });
+  } catch (e) {
+    list.innerHTML = '<li style="color:var(--bad)">历史加载失败：' + e.message + '</li>';
+  }
+}
+
+async function replay(runId) {
+  setStatus('回放 ' + runId + '…');
+  try {
+    const data = await (await fetch('/api/runs/' + encodeURIComponent(runId))).json();
+    applyHints(data.visual_hints);
+    $('report').textContent = data.report || '（无报告）';
+    setStatus('已回放 ' + runId + '（仅地图与报告，问答面板保留当前内容）');
+  } catch (e) {
+    setStatus('回放失败：' + e.message, true);
+  }
+}
+
+$('ask').onclick = ask;
+document.querySelectorAll('.chip[data-q]').forEach((b) => {
+  b.onclick = () => { $('q').value = b.dataset.q; ask(); };
+});
+$('q').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) ask();
+});
+$('base-vec').onclick = () => setBase('vec');
+$('base-img').onclick = () => setBase('img');
+$('replay').onclick = () => (lastHints && lastHints.markers && lastHints.markers.length
+  ? flyToHints(lastHints) : flyTo((lastHints && lastHints.camera) || HOME));
+$('clear').onclick = () => { clearScene(); hintNote.textContent = ''; };
+$('show-labels').onchange = (e) => {
+  showLabels = e.target.checked;
+  viewer.entities.values.forEach((en) => { if (en.label) en.label.show = showLabels; });
+};
+
+flyTo(HOME);
+loadRuns();
+// 调试钩子：浏览器控制台里可用 window.__geo.viewer 检查场景与实体
+window.__geo = { viewer, applyHints, pinIndex };
+fetch('/api/health').then((r) => r.json()).then((h) => {
+  if (h.ok) {
+    setStatus('已连接 ' + h.servers.length + ' 个 MCP Server / ' + h.tools.length
+              + ' 个工具 · 模型 ' + h.model);
+  } else {
+    const banner = $('banner');
+    banner.style.display = 'block';
+    banner.textContent = 'Agent 未就绪：' + (h.error || '未知原因');
+  }
+}).catch((e) => setStatus('健康检查失败：' + e.message, true));
+</script>
+</body>
+</html>

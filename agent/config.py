@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-chat"
     request_timeout_s: float = 180.0
     temperature: float = 0.0
+    # 可视化：天地图 Key 类型是「浏览器端」，只能注入页面由浏览器直连（服务端代理会被拒）
+    tianditu_key: str = ""
+    cesium_base_url: str = "https://cdn.jsdelivr.net/npm/cesium@1.135.0/Build/Cesium/"
 
     @property
     def openai_base_url(self) -> str:

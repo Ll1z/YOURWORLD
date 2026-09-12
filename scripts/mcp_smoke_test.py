@@ -29,11 +29,24 @@ CASES = [
             ("list_districts", {}),
             ("list_districts", {"name": "东城区"}),
             ("summarize_poi", {"district": "东城区", "preset": "medical"}),
-            ("query_nearby", {"district": "东城区", "radius_m": 1000, "preset": "medical"}),
+            ("find_places", {"name": "北京协和医院"}),
+            ("find_places", {"name": "中关村", "district": "海淀区", "limit": 5}),
+            ("find_places", {"name": "王府井", "limit": 3}),
+            ("query_nearby", {"lon": 116.4074, "lat": 39.9042, "radius_m": 1000, "preset": "medical"}),
             ("query_nearby", {"lon": 116.4074, "lat": 39.9042, "radius_m": 800, "preset": "convenience"}),
+            ("distance_between", {"a_ref": "poi_area/19126182", "b_ref": "poi_point/13888669701"}),
+            ("distance_between", {"a_ref": "anchor/5196349280", "b_ref": "anchor/6617849503"}),
+            ("distance_between", {"a_lon": 116.4074, "a_lat": 39.9042,
+                                  "b_lon": 116.4171, "b_lat": 39.9103}),
         ],
         "resources": ["compute://schema"],
         "templates": [],
+        "expect_error": [
+            ("query_nearby", {"district": "东城区", "radius_m": 1000}, "lon"),
+            ("distance_between", {"a_ref": "poi_area/19126182"}, "b 端点信息不足"),
+            ("query_nearby", {"lon": 116.4074, "lat": 39.9042, "preset": "不存在的口径"}, "未知口径预设"),
+            ("distance_between", {"a_ref": "poi_point/不存在", "b_lon": 116.4, "b_lat": 39.9}, "库中找不到"),
+        ],
     },
     {
         "name": "geo_catalog",
@@ -44,6 +57,7 @@ CASES = [
         ],
         "resources": ["catalog://datasets", "catalog://dataset/osm-beijing-full"],
         "templates": ["catalog://dataset/{dataset_id}"],
+        "expect_resource_error": [("catalog://dataset/not-registered", "未登记的数据集")],
     },
     {
         "name": "geo_knowledge",
@@ -55,8 +69,9 @@ CASES = [
                                      "from_crs": "GCJ-02", "to_crs": "WGS84"}),
         ],
         "resources": ["knowledge://scopes", "knowledge://scope/poi_scope",
-                      "knowledge://coords/systems"],
+                      "knowledge://scope/anchor_scope", "knowledge://coords/systems"],
         "templates": ["knowledge://scope/{scope_id}"],
+        "expect_resource_error": [("knowledge://scope/not-registered", "未登记的口径")],
     },
 ]
 
@@ -115,6 +130,23 @@ async def run_case(case: dict) -> list[tuple[str, bool, str]]:
                     results.append((label, not res.is_error, detail[:220]))
                 except Exception as e:  # noqa: BLE001
                     results.append((label, False, f"{type(e).__name__}: {e}"))
+            for name, args, expect in case.get("expect_error", []):
+                label = f"expect_error {name}({json.dumps(args, ensure_ascii=False)})"
+                try:
+                    res = await asyncio.wait_for(session.call_tool(name, args), TIMEOUT)
+                    text = json.dumps(res.content, ensure_ascii=False, default=str)
+                    results.append((label, bool(res.is_error) and expect in text, text[:200]))
+                except Exception as e:  # noqa: BLE001
+                    results.append((label, expect in str(e), f"{type(e).__name__}: {e}"))
+
+            for uri, expect in case.get("expect_resource_error", []):
+                label = f"expect_resource_error {uri}"
+                try:
+                    await asyncio.wait_for(session.read_resource(uri), TIMEOUT)
+                    results.append((label, False, "本应报错，却读取成功了"))
+                except Exception as e:  # noqa: BLE001
+                    results.append((label, expect in str(e), f"{type(e).__name__}: {str(e)[:160]}"))
+
     return results
 
 

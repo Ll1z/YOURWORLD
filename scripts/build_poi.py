@@ -1,14 +1,21 @@
-"""从 OSM 切片抽取 POI，分层输出点层与面层，并标注所属区。
+"""从 OSM 切片抽取 POI 与锚点，分层输出并标注所属区。
 
 设计要点（对应方案 C）：
 - 点层与面层分开保存，口径由查询层决定，不在数据层做隐式合并
 - 每个 POI 一行，主分类按 PRIORITY 顺序取第一个命中的键，原始标签完整保留在 other_tags
 - 面层额外给出代表点（rep_x/rep_y）与大地线面积（area_m2），避免查询时重复计算
+- 锚点层单独输出：POI 层回答「这里有什么设施」，锚点层回答「这个地方叫什么、在哪」
 
 身份口径（重要）：
 - GDAL 的 OSM multipolygons 层把要素 id 拆成两个互斥字段：来自 relation 的填 osm_id，
   来自闭合 way 的填 osm_way_id。只读 osm_id 会丢掉绝大多数面要素的身份，必须 coalesce。
 - 主键是 (osm_type, osm_id) 组合：way 与 relation 的编号空间独立，同号不代表同一要素。
+
+锚点口径：
+- 锚点是「人用来定位的参照物」，取自 place / railway / highway / public_transport 四类标签，
+  且必须带名称。place=suburb 这类节点此前会被 POI 层的 PRIORITY 过滤掉，
+  但「中关村」「国贸」恰恰是用户最常用的定位参照物。
+- 只取点层。线状站台、面状地名不在此列。
 """
 
 import re
@@ -26,10 +33,20 @@ PBF = r"data\raw\osmf-beijing-full.osm.pbf"
 DISTRICTS = r"data\processed\districts_wgs84.gpkg"
 OUT_POINT = r"data\processed\poi_point.gpkg"
 OUT_AREA = r"data\processed\poi_area.gpkg"
+OUT_ANCHOR = r"data\processed\anchors.gpkg"
 
 PRIORITY = ("amenity", "healthcare", "shop", "tourism", "office", "leisure", "craft", "historic", "sport")
 HSTORE = re.compile(r'"((?:[^"\\]|\\.)*)"\s*=>\s*(?:"((?:[^"\\]|\\.)*)"|([^,]*))')
 GEOD = Geod(ellps="WGS84")
+
+# 锚点标签白名单：按此优先级每个要素只取一个，避免同一站点被算两次
+ANCHOR_KINDS = (
+    ("place", frozenset({"city", "town", "suburb", "quarter", "neighbourhood",
+                         "village", "hamlet", "locality"})),
+    ("railway", frozenset({"station", "halt", "tram_stop", "subway_entrance"})),
+    ("highway", frozenset({"bus_stop", "motorway_junction", "elevator"})),
+    ("public_transport", frozenset({"station"})),
+)
 
 
 def parse_hstore(s):
@@ -76,6 +93,26 @@ def build(tags_series, extra_df, osm_type, osm_id=None):
     return out, keep
 
 
+def build_anchors(tags_series, pts):
+    """从点层抽取带名称的定位锚点。"""
+    names = pts["name"].to_numpy()
+    osm_ids = pts["osm_id"].astype(str).to_numpy()
+    geometry = pts.geometry.values
+    rows = []
+    for i, tags in enumerate(tags_series):
+        name = names[i]
+        if not isinstance(name, str) or not name:
+            continue
+        for key, allowed in ANCHOR_KINDS:
+            value = tags.get(key)
+            if value and value in allowed:
+                rows.append(("node", osm_ids[i], name, key, value,
+                             float(geometry[i].x), float(geometry[i].y)))
+                break
+    return pd.DataFrame(rows, columns=["osm_type", "osm_id", "name", "category_key",
+                                       "category_value", "lon", "lat"])
+
+
 print("=== 点层 ===")
 pts = pyogrio.read_dataframe(PBF, layer="points", on_invalid="ignore")
 pt_tags = pts["other_tags"].map(parse_hstore)
@@ -88,6 +125,17 @@ pt_df, pt_keep = build(pt_tags, pts, np.full(len(pts), "node", dtype=object))
 print(f"  points 总数 {len(pts):,}，其中含 POI 标签 {pt_keep.sum():,}")
 pt_gdf = gpd.GeoDataFrame(pt_df[pt_keep].reset_index(drop=True),
                           geometry=pts.geometry[pt_keep].reset_index(drop=True), crs="EPSG:4326")
+
+print("\n=== 锚点层 ===")
+anchor_df = build_anchors(pt_tags, pts)
+anchor_gdf = gpd.GeoDataFrame(
+    anchor_df,
+    geometry=gpd.points_from_xy(anchor_df["lon"], anchor_df["lat"]) if len(anchor_df) else [],
+    crs="EPSG:4326",
+)
+print(f"  命名锚点 {len(anchor_gdf):,} 条")
+if len(anchor_gdf):
+    print(anchor_gdf["category_value"].value_counts().head(10).to_string())
 
 del pts, pt_tags, pt_df
 
@@ -117,22 +165,22 @@ del mp, mp_tags, mp_df
 print("\n=== 标注所属区 ===")
 dist = pyogrio.read_dataframe(DISTRICTS, layer="districts")[["adcode", "name", "geometry"]]
 dist = dist.rename(columns={"name": "district"})
-for gdf in (pt_gdf, mp_gdf):
+for gdf in (pt_gdf, mp_gdf, anchor_gdf):
     j = gpd.sjoin(gdf, dist, how="left", predicate="intersects")
     j = j[~j.index.duplicated(keep="first")]
     gdf["district"] = j["district"].reindex(gdf.index)
-    if gdf is mp_gdf:
-        rp = shapely.point_on_surface(mp_gdf.geometry.values)
-        gdf["rep_x"] = shapely.get_x(rp)
-        gdf["rep_y"] = shapely.get_y(rp)
-        areas = [abs(GEOD.geometry_area_perimeter(g)[0]) for g in mp_gdf.geometry]
-        gdf["area_m2"] = np.round(areas, 1)
+
+rp = shapely.point_on_surface(mp_gdf.geometry.values)
+mp_gdf["rep_x"] = shapely.get_x(rp)
+mp_gdf["rep_y"] = shapely.get_y(rp)
+mp_gdf["area_m2"] = np.round([abs(GEOD.geometry_area_perimeter(g)[0]) for g in mp_gdf.geometry], 1)
 
 pt_gdf.to_file(OUT_POINT, layer="poi_point", driver="GPKG")
 mp_gdf.to_file(OUT_AREA, layer="poi_area", driver="GPKG")
+anchor_gdf.to_file(OUT_ANCHOR, layer="anchor", driver="GPKG")
 
 print("\n=== 分布统计 ===")
-for label, gdf in (("点层", pt_gdf), ("面层", mp_gdf)):
+for label, gdf in (("点层", pt_gdf), ("面层", mp_gdf), ("锚点层", anchor_gdf)):
     print(f"\n{label}: {len(gdf):,}")
     print("  按区:")
     print(gdf["district"].fillna("(五区外)").value_counts().to_string())
@@ -148,4 +196,11 @@ for label, gdf in (("点层", pt_gdf), ("面层", mp_gdf)):
     if len(med):
         print("    医疗类分布:", med["category_value"].value_counts().to_dict())
 
-print(f"\n=== 输出 ===\n  {OUT_POINT}\n  {OUT_AREA}")
+print("\n=== 锚点层常见参照物 ===")
+if len(anchor_gdf):
+    for value in ("suburb", "quarter", "neighbourhood", "station", "subway_entrance", "bus_stop"):
+        sub = anchor_gdf[anchor_gdf["category_value"] == value]
+        sample = "、".join(str(n) for n in sub["name"].head(4))
+        print(f"  {value}: {len(sub)} 条，示例 {sample or '（无）'}")
+
+print(f"\n=== 输出 ===\n  {OUT_POINT}\n  {OUT_AREA}\n  {OUT_ANCHOR}")

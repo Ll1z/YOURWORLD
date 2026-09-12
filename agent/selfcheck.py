@@ -176,6 +176,51 @@ def check_magnitude(result: dict) -> Check:
     return Check("magnitude", not problems, detail)
 
 
+def check_distance(result: dict) -> Check:
+    """distance_between 专项：UTM 平面距离与椭球面大地线距离必须互相印证。
+
+    这两种算法是独立实现的（pyproj Transformer 对 Geod.inv），若坐标系或单位被弄错，
+    它们会明显对不上。所以「两个数彼此印证」本身就是一道有效的自检。
+    """
+    planar = result.get("planar_distance_m")
+    geodesic = result.get("geodesic_distance_m")
+    if planar is None or geodesic is None:
+        return Check("distance", False, "结果缺少平面距离或大地线距离字段")
+
+    problems: list[str] = []
+    if planar < 0 or geodesic < 0:
+        problems.append(f"距离为负：planar={planar}, geodesic={geodesic}")
+
+    if geodesic > 0:
+        actual = abs(planar - geodesic) / geodesic * 100.0
+        # 两个距离都舍入到 0.01 m，据此推出重新推算百分比时的容差上界
+        rounding_slack = 2 * 0.01 / max(abs(geodesic), 1.0) * 100.0
+        if abs(actual - (result.get("planar_vs_geodesic_pct") or 0.0)) > rounding_slack:
+            problems.append(
+                f"planar_vs_geodesic_pct={result.get('planar_vs_geodesic_pct')} 与实际算得的 {actual:.4f} 不符")
+        if actual > 0.5:
+            problems.append(
+                f"平面距离与大地线距离偏差 {actual:.4f}%，超出 UTM 50N 在北京的正常范围，疑似坐标系错配")
+    elif planar > 1e-6:
+        problems.append(f"大地线距离为 0 但平面距离为 {planar}，两点重合判定不一致")
+
+    for name in ("a", "b"):
+        endpoint = result.get(name) or {}
+        lon, lat = endpoint.get("lon"), endpoint.get("lat")
+        if lon is None or lat is None:
+            problems.append(f"{name} 端点缺少坐标")
+        elif not _in_china(lon, lat):
+            problems.append(f"{name} 端点坐标 ({lon}, {lat}) 不在合理经纬度范围内")
+
+    bearing = result.get("bearing_deg")
+    if bearing is None or not (0.0 <= bearing < 360.0):
+        problems.append(f"方位角应在 [0, 360) 内，实际 {bearing}")
+
+    detail = "；".join(problems) or (
+        f"平面 {planar} m 与大地线 {geodesic} m 互相印证，偏差 {result.get('planar_vs_geodesic_pct')}%，"
+        "两端点坐标合理")
+    return Check("distance", not problems, detail)
+
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 # 千分位逗号要先去干净，否则「18,610.7」会被拆成 18 和 610.7 两个假数字
 _THOUSANDS = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")

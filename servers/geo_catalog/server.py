@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ResourceNotFoundError
 
 ROOT = Path(__file__).resolve().parents[2]
 CARDS = ROOT / "servers" / "geo_catalog" / "cards"
@@ -52,9 +53,9 @@ def list_resources_() -> dict:
               description="按 id 读取完整数据卡片")
 def get_card(dataset_id: str) -> dict:
     """读取指定数据集的完整卡片，含 CRS、单位、字段 schema、样例行与全部已知坑。"""
-    p = CARDS / f"{dataset_id}.json"
-    if not p.exists():
-        raise ValueError(f"未登记的数据集: {dataset_id}；可用 {sorted(_cards())}")
+    p = next((q for q in CARDS.glob("*.json") if q.stem == dataset_id), None)
+    if p is None:
+        raise ResourceNotFoundError(f"未登记的数据集: {dataset_id}；可用 {sorted(_cards())}")
     return json.loads(p.read_text(encoding="utf-8"))
 
 
