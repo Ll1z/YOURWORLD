@@ -203,7 +203,9 @@ def main() -> int:
     if args.dry_run:
         print("dry-run：未写文件")
         return 0
-    LESSONS.write_text(json.dumps(doc, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    # 显式 LF：Windows 上 write_text 默认把 \n 翻成 \r\n，而仓库约定是 LF（.gitattributes）
+    with open(LESSONS, "w", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(doc, ensure_ascii=False, indent=1) + "\n")
     print(f"已写入 {LESSONS.relative_to(ROOT)}："
           f"教训 {len(doc['lessons'])} 条，候选 {len(doc['candidates'])} 条")
     return 0
