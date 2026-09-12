@@ -24,6 +24,7 @@
 - MCP：官方 Python SDK `mcp` 2.x（`from mcp.server.mcpserver import MCPServer`；FastMCP 在 2.x 已更名为 MCPServer，`mcp.server.fastmcp` 路径会直接报错），先 stdio，稳定后 Streamable HTTP
 - MCP 客户端（实测坑）：用 `mcp.client.stdio.stdio_client` + `ClientSession`，**进入上下文后必须显式 `await session.initialize()`**，否则服务端对后续请求一律返回 `Invalid request parameters`；返回模型字段全是 snake_case（`server_info` / `protocol_version` / `resource_templates` / `structured_content`）。冒烟测试见 `scripts/mcp_smoke_test.py`
 - 检索：DuckDB FTS + VSS 单文件索引起步，本地 bge 系列模型做 embedding 与 rerank
+- 沙箱：L1 受限子进程（`geo_compute/sandbox.py`）。Windows 侧用 Job Object 压内存与进程数，子进程内装导入黑名单 + socket 守卫 + 路径围栏，执行前先过 AST 静态检查；后端可替换，换 L2 Docker 只动这一个类
 - 模型：DeepSeek API（OpenAI 兼容接口），密钥只放 `.env`
 - 观测：OpenTelemetry GenAI 语义约定 + Langfuse（Stage 2 起接入）
 
@@ -43,7 +44,8 @@
 - 每个数据集必须配一张数据卡片（dataset card），字段规范见 `HANDOFF.md`
 - MCP 分工：Resource 承载上下文（数据卡、schema、字典），Tool 承载动作与计算，不把一切都做成 Tool
 - 空间对象查询走空间索引（R-tree / H3 网格），不用向量检索做空间过滤
-- Agent 生成的代码一律在 `sandbox/run_<id>/` 内以受限子进程执行：禁网、超时、内存上限、数据只读
+- Agent 生成的代码一律在 `sandbox/run_<id>/` 内以受限子进程执行：禁网、超时（默认 30 秒）、内存上限（默认 1024 MB）、数据只读、只许写运行目录。`run_python` 是它的对外入口，也是唯一入口——不要在别处起子进程跑 Agent 写的代码
+- 能用现成工具回答的，不许用 `run_python` 绕过去：工具的口径全项目唯一，脚本里的口径是临时的
 - 敏感信息只放 `.env`，禁止写入代码或提交进版本库
 
 ## 目录约定
@@ -56,7 +58,7 @@ servers/geo_compute/           MCP：DuckDB-spatial + 沙箱执行 + 出图
 servers/geo_knowledge/         MCP：标准 / 术语 / 方法库；坐标系口径与纠偏在 coords/，类别中文别名在 categories/
 agent/                         mcp_hub（聚合三个 MCP Server）+ loop（裸循环）+ selfcheck（空间自检）+ config
 web/                           FastAPI 薄壳（server.py）与 Cesium 前端（index.html），只消费 agent/report.py 的产物
-sandbox/                       代码执行运行目录（每次运行独立子目录）
+sandbox/                       代码执行运行目录（每次运行一个 run_<id> 子目录，留 code / _job.json / _result.json / 产物，可回放；不入库）
 eval/                          评测集：cases.json 题库、ground_truth.json 冻结期望值、__init__.py/executor.py 比对与判定、runs/ 每次跑的产物（不入库）
 data/                          样例数据与索引；raw 与 processed 默认不入库，地基数据走 .gitignore 白名单
 scripts/                       一次性数据准备、验证与评测脚本；类别别名对库校验见 check_categories.py，评测入口见 build_eval.py / run_eval.py
@@ -74,10 +76,11 @@ servers/ 下的包以可编辑模式安装（hatchling），全项目可直接�
 3. `scripts/build_duckdb.py` —— 装载 DuckDB 并建立 R-tree 空间索引
 4. `scripts/ask_nearby.py` —— 端到端查询，产出 result.geojson / result.csv / query.sql / report.md
 5. `scripts/mcp_smoke_test.py` —— stdio 拉起三个 MCP Server，全量校验 tools / resources / resource templates 与工具调用
-6. `scripts/ask_agent.py "问题"` —— Agent 裸循环：自然语言 → 选 MCP 工具 → 答案 + 空间自检 + visual_hints（前端消费）
-7. `scripts/build_eval.py` —— 跑真实工具生成/刷新 `eval/ground_truth.json`，并做 cross_check 一致性断言
-8. `scripts/run_eval.py` —— 评测：`--mode data` 零 token 逐字段比对冻结值；`--mode agent` 真跑 Agent，判定工具选择、数值溯源、关键数字与拒答行为
-9. `web/server.py` —— Web 入口：`uv run python web/server.py --port 8000`，浏览器打开 `http://127.0.0.1:8000`
+6. `scripts/sandbox_smoke_test.py` —— 沙箱验收：正常执行、静态检查、禁网、禁起进程、文件围栏、超时、内存上限、traceback 回传，逐条真起子进程验证
+7. `scripts/ask_agent.py "问题"` —— Agent 裸循环：自然语言 → 选 MCP 工具 → 答案 + 空间自检 + visual_hints（前端消费）
+8. `scripts/build_eval.py` —— 跑真实工具生成/刷新 `eval/ground_truth.json`，并做 cross_check 一致性断言
+9. `scripts/run_eval.py` —— 评测：`--mode data` 零 token 逐字段比对冻结值；`--mode agent` 真跑 Agent，判定工具选择、数值溯源、关键数字与拒答行为
+10. `web/server.py` —— Web 入口：`uv run python web/server.py --port 8000`，浏览器打开 `http://127.0.0.1:8000`
 
 评测集是这一层的回归网。题库 `eval/cases.json` 每条用例都钉死查询中心（`center_ref` 指向具体锚点——同名候选相距数百米，会改变半径边缘设施的进出）；期望值不手写，由 `scripts/build_eval.py` 跑真实工具生成并冻结，`fingerprint` 里带 query.py / server.py / poi_scope.json / aliases.json 的哈希与 DB 大小、mtime，任何口径、别名或数据漂移都会显形。改动查询口径、别名表或数据之后，必须重跑 `build_eval.py` 再跑 `run_eval.py --mode data`。`--mode agent` 另外判定四件事：调了哪个工具、数字能否溯源、关键数字是否出现在答案里、该拒绝的是否拒绝；用例标 `agent_skip` 表示「两种正确行为无法用固定关键词区分」，只在 data 层断言。
 

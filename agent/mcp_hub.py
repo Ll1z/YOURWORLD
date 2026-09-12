@@ -37,6 +37,11 @@ CONTEXT_RESOURCES: list[tuple[str, str]] = [
     ("geo_knowledge", "knowledge://coords/systems"),
 ]
 
+# 溯源池不采信的资源：目录型清单里的数字在描述「别的类别有多少条」「一共几个数据集」，
+# 与本次提问无关。留在池子里会让任意小整数都能找到「出处」——实测「4 家咖啡馆」这种
+# 编造的计数，就是被 compute://categories 里的 4 兜住的。
+GROUNDING_EXCLUDE = ("compute://categories", "catalog://datasets")
+
 
 def _as_json(result: Any) -> dict:
     structured = getattr(result, "structured_content", None)

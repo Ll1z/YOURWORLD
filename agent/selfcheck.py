@@ -242,27 +242,34 @@ def _collect_numbers(obj, pool: set[float]) -> None:
             _collect_numbers(v, pool)
 
 
-def _grounding_pool(tool_results) -> set[float]:
-    """把工具返回里的数字展开成可溯源集合。
+def _grounding_pools(tool_results) -> tuple[set[float], set[float]]:
+    """把可信来源里的数字拆成 (原值池, 换算池)。
 
-    额外加入 ×1000 / ÷1000 与取整变体：模型把「1000 米」写成「1 公里」、
-    把「371.4 米」写成「371 米」都属于正常的同一事实，不该判为编造。
-    用的是绝对容差而非百分比容差——百分比会让 116.4 这种经度把 120 也「兜住」。
+    原值池管「同一个数写得更短」：371.4 米写成 371 米，绝对容差 0.5。
+    换算池管真换算：1000 米写成 1 公里。它必须按数值量级给容差——曾经用统一容差，
+    结果 CRS 4326 ÷ 1000 = 4.326 把「4 家咖啡馆」这种编造的计数也判成有出处，
+    溯源形同虚设（2026-09-12 实测抓到的洞）。
     """
     raw: set[float] = set()
     _collect_numbers(tool_results, raw)
-    pool: set[float] = set()
+    scaled: set[float] = set()
     for t in raw:
-        pool.update({t, t / 1000.0, t * 1000.0, t / 10000.0, t * 10000.0, float(round(t))})
-    return pool
+        scaled.update({t / 1000.0, t * 1000.0, t / 10000.0, t * 10000.0})
+    return raw, scaled
+
+
+def _grounded(token: float, raw: set[float], scaled: set[float]) -> bool:
+    if any(abs(token - t) <= 0.5001 for t in raw):
+        return True
+    return any(abs(token - s) <= max(0.005, abs(s) * 0.01) for s in scaled)
 
 
 def check_grounding(answer: str, tool_results) -> Check:
-    """最终回答里的数字必须能在工具返回中找到出处。"""
-    pool = _grounding_pool(tool_results)
+    """最终回答里的数字必须能在可信来源中找到出处。"""
+    raw, scaled = _grounding_pools(tool_results)
     ungrounded = [
         token for token in _NUMBER.findall(_THOUSANDS.sub("", answer))
-        if not any(abs(float(token) - t) <= 0.5001 for t in pool)
+        if not _grounded(float(token), raw, scaled)
     ]
 
     if ungrounded:

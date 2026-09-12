@@ -12,18 +12,23 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel, Field
 
 from geo_compute import query
+from geo_compute.sandbox import LocalProcessSandbox
 
 mcp = MCPServer(
     name="geo-compute",
-    version="0.2.0",
+    version="0.3.0",
     description="空间查询与统计。数据为北京五区的 OSM POI 与行政边界，"
-                "坐标系 EPSG:4326，距离在 UTM 50N 下按米计算。",
+                "坐标系 EPSG:4326，距离在 UTM 50N 下按米计算；"
+                "另有受限沙箱 run_python 供工具覆盖不到的计算使用。",
 )
 
 CRS_NOTE = "存储 CRS EPSG:4326；距离计算 CRS EPSG:32650（UTM 50N，中央经线 117 度）"
 DATA_SOURCE = "OpenStreetMap 北京省级切片 2026-09-11（ODbL 1.0）"
 # compute://categories 只列 >= 该条数的类别，避免上下文被长尾撑爆（校验仍用全量清单）
 CATALOG_MIN_COUNT = 5
+
+# 沙箱后端只在 geo_compute.sandbox 里换（L1 受限子进程 → L2 Docker），工具签名不动
+SANDBOX = LocalProcessSandbox()
 
 NO_CENTER_HINT = (
     "半径查询必须给出明确的查询中心：请传 lon/lat，"
@@ -352,6 +357,27 @@ def list_districts(name: str | None = None) -> list[dict]:
     注意 source 字段：西城区边界来自 DataV 纠偏补齐，其余四区取自 OSM。
     """
     return query.district_info(name)
+
+
+@mcp.tool()
+def run_python(code: str, purpose: str = "", timeout_s: float = 30.0,
+               memory_mb: int = 1024) -> dict:
+    """在受限沙箱里跑一段 Python，用于固定工具没封装过的计算。
+
+    该用它：一次性的空间加工——自定义缓冲区、按距离分箱、多表关联算指标、
+    导出中间结果。
+    不该用它：能用 query_nearby / summarize_poi / distance_between / find_places
+    回答的，一律先用工具。工具的口径全项目唯一，代码里的口径是你临时写的。
+
+    预置环境：con（只读 DuckDB 连接，与工具同一份库）、query（查询口径模块）、
+    pd / np / gpd / shapely / pyproj，以及 RUN_DIR（唯一可写目录）、DATA_DIR、DB。
+    想把结构化结果带回来，把值赋给 RESULT 变量；写进 RUN_DIR 的文件会作为产物回报。
+
+    围栏：禁网、禁起子进程；默认 30 秒超时、1024 MB 内存上限；读取项目内文件
+    只放行 data/ 与运行目录。失败会连 traceback 一起返回，照着它改再跑一次。
+    """
+    return SANDBOX.run(code, purpose=purpose, timeout_s=timeout_s,
+                       memory_mb=memory_mb).as_dict()
 
 
 def main() -> None:

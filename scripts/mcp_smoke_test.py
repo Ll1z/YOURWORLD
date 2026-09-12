@@ -45,6 +45,8 @@ CASES = [
             ("distance_between", {"a_ref": "anchor/5196349280", "b_ref": "anchor/6617849503"}),
             ("distance_between", {"a_lon": 116.4074, "a_lat": 39.9042,
                                   "b_lon": 116.4171, "b_lat": 39.9103}),
+            ("run_python", {"code": "RESULT = con.execute('select count(*) from districts').fetchone()[0]",
+                            "purpose": "冒烟：沙箱工具端到端可用"}),
         ],
         "resources": ["compute://schema", "compute://categories"],
         "templates": [],

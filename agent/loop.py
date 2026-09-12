@@ -15,7 +15,7 @@ from typing import Any
 from openai import OpenAI
 
 from agent.config import Settings
-from agent.mcp_hub import MCPHub
+from agent.mcp_hub import GROUNDING_EXCLUDE, MCPHub
 
 SYSTEM_PROMPT = """你是 GeoAnalyst，一个地理空间分析 Agent。当前数据只覆盖北京五区：东城区、西城区、朝阳区、丰台区、海淀区。
 
@@ -31,6 +31,8 @@ SYSTEM_PROMPT = """你是 GeoAnalyst，一个地理空间分析 Agent。当前�
 9. 查什么类别只能来自三处：compute://categories 的类别清单、knowledge://categories/aliases 的中文说法、用户原话里的类别词。工具报「不认识的类别」时，改用它给出的近似建议或向用户澄清，禁止换成另一个类别去凑答案——「马甸桥 10 公里内有哪些高校」答成一堆医院，就是这么来的。
 10. 某个类别 0 命中就是 0：如实说「OSM 数据里没有」，并说清查的是哪个类别，不要用别的类别替代，也不要把 0 说成「工具没能给出结果」。
 11. 现有工具答不了的问题，直接说明缺什么数据或工具，不要编造：例如地铁站、火车站只在 anchor 层，不参与半径检索，问「附近有哪些地铁站」目前没有数据支持。
+12. 现成工具拼不出来的分析（自定义缓冲区、按距离分箱、多表关联、导出中间结果），可以用 run_python 在受限沙箱里写代码算。但顺序不能反：能用 find_places / query_nearby / summarize_poi / distance_between 回答的，一律先用工具——工具的口径全项目唯一，脚本里的口径是你临时写的。沙箱里的 con 就是工具用的那份库，优先在脚本里复用它，不要把数值硬编码进代码。
+13. 沙箱脚本失败会连 traceback 一起返回：照着 traceback 改，改完重跑；同一个错误连续两次没修好就停下来如实说明，不要换个说法糊过去。沙箱输出同样是工具返回，答案里的数字必须能在其中找到出处。沙箱默认 30 秒超时、1024 MB 内存上限，长循环自己先分片。
 
 请用中文回答。"""
 
@@ -127,8 +129,12 @@ def grounding_pool(question: str, clarification: str | None, context: dict,
 
     用户在界面上点选的中心点与原始提问同属输入，模型引用它不算凭空造数；
     漏了它就会把「用户自己给的坐标」判成幻觉。
+    目录型清单（类别目录、数据集清单）不进池子：它们的数字在描述别的对象，
+    留在里面会让任意小整数都能找到「出处」。
     """
-    return [context, {"question": question}, {"clarification": clarification},
+    evidence = {uri: value for uri, value in context.items()
+                if uri not in GROUNDING_EXCLUDE}
+    return [evidence, {"question": question}, {"clarification": clarification},
             *[i.result for i in invocations]]
 
 
