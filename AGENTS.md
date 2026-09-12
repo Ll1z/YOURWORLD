@@ -49,6 +49,7 @@
 - 能用现成工具回答的，不许用 `run_python` 绕过去：工具的口径全项目唯一，脚本里的口径是临时的
 - 敏感信息只放 `.env`，禁止写入代码或提交进版本库
 - 观测不得成为跑通的前提：SDK 缺失或出口配错只记一条告警，不中断问答
+- 经验库只放能追到出处的条目：已确认的进 lessons（会被索引成 kind=experience，检索得到），`scripts/distill_experience.py` 从运行轨迹抽出的候选留在 candidates 里——不索引、不当结论用。
 
 ## 目录约定
 
@@ -57,7 +58,7 @@ Stage 1 骨架已于 2026-09-12 建立，当前结构：
 ```
 servers/geo_catalog/           MCP：数据目录 + 混合检索；数据卡片存 cards/，索引实现在 index.py，embedding 封装在 embedding.py
 servers/geo_compute/           MCP：DuckDB-spatial + 沙箱执行 + 出图
-servers/geo_knowledge/         MCP：标准 / 术语 / 方法库；坐标系口径与纠偏在 coords/，类别中文别名在 categories/
+servers/geo_knowledge/         MCP：标准 / 术语 / 方法库；坐标系口径与纠偏在 coords/，类别中文别名在 categories/，程序性记忆（经验库）在 experience/lessons.json
 agent/                         mcp_hub（聚合三个 MCP Server）+ loop（裸循环）+ selfcheck（空间自检）+ config
 web/                           FastAPI 薄壳（server.py）与 Cesium 前端（index.html），只消费 agent/report.py 的产物
 sandbox/                       代码执行运行目录（每次运行一个 run_<id> 子目录，留 code / _job.json / _result.json / 产物，可回放；不入库）
@@ -77,13 +78,14 @@ servers/ 下的包以可编辑模式安装（hatchling），全项目可直接�
 2. `scripts/build_poi.py` —— 从 OSM 切片抽取 POI 点层与面层，标注所属区
 3. `scripts/build_duckdb.py` —— 装载 DuckDB 并建立 R-tree 空间索引
 4. `scripts/ask_nearby.py` —— 端到端查询，产出 result.geojson / result.csv / query.sql / report.md
-5. `scripts/build_knowledge_index.py` —— 从数据卡片、口径文件、类别别名与坐标系定义切块，建 `knowledge.duckdb` 的 FTS 与 HNSW 索引
-6. `scripts/mcp_smoke_test.py` —— stdio 拉起三个 MCP Server，全量校验 tools / resources / resource templates 与工具调用
-7. `scripts/sandbox_smoke_test.py` —— 沙箱验收：正常执行、静态检查、禁网、禁起进程、文件围栏、超时、内存上限、traceback 回传，逐条真起子进程验证
-8. `scripts/ask_agent.py "问题"` —— Agent 裸循环：自然语言 → 选 MCP 工具 → 答案 + 空间自检 + visual_hints（前端消费）
-9. `scripts/build_eval.py` —— 跑真实工具生成/刷新 `eval/ground_truth.json`，并做 cross_check 一致性断言
-10. `scripts/run_eval.py` —— 评测：`--mode data` 零 token 逐字段比对冻结值；`--mode agent` 真跑 Agent，判定工具选择、数值溯源、关键数字与拒答行为
-11. `web/server.py` —— Web 入口：`uv run python web/server.py --port 8000`，浏览器打开 `http://127.0.0.1:8000`
+5. `scripts/build_knowledge_index.py` —— 从数据卡片、口径文件、类别别名、坐标系定义与经验条目切块，建 `knowledge.duckdb` 的 FTS 与 HNSW 索引
+6. `scripts/distill_experience.py` —— 扫运行轨迹，把重复出现的坑抽成候选经验并累加次数（`--dry-run` 只看不写）
+7. `scripts/mcp_smoke_test.py` —— stdio 拉起三个 MCP Server，全量校验 tools / resources / resource templates 与工具调用
+8. `scripts/sandbox_smoke_test.py` —— 沙箱验收：正常执行、静态检查、禁网、禁起进程、文件围栏、超时、内存上限、traceback 回传，逐条真起子进程验证
+9. `scripts/ask_agent.py "问题"` —— Agent 裸循环：自然语言 → 选 MCP 工具 → 答案 + 空间自检 + visual_hints（前端消费）
+10. `scripts/build_eval.py` —— 跑真实工具生成/刷新 `eval/ground_truth.json`，并做 cross_check 一致性断言
+11. `scripts/run_eval.py` —— 评测：`--mode data` 零 token 逐字段比对冻结值；`--mode agent` 真跑 Agent，判定工具选择、数值溯源、关键数字与拒答行为
+12. `web/server.py` —— Web 入口：`uv run python web/server.py --port 8000`，浏览器打开 `http://127.0.0.1:8000`
 
 评测集是这一层的回归网。题库 `eval/cases.json` 每条用例都钉死查询中心（`center_ref` 指向具体锚点——同名候选相距数百米，会改变半径边缘设施的进出）；期望值不手写，由 `scripts/build_eval.py` 跑真实工具生成并冻结，`fingerprint` 里带 query.py / server.py / poi_scope.json / aliases.json 的哈希与 DB 大小、mtime，任何口径、别名或数据漂移都会显形。改动查询口径、别名表或数据之后，必须重跑 `build_eval.py` 再跑 `run_eval.py --mode data`。`--mode agent` 另外判定四件事：调了哪个工具、数字能否溯源、关键数字是否出现在答案里、该拒绝的是否拒绝；用例标 `agent_skip` 表示「两种正确行为无法用固定关键词区分」，只在 data 层断言。
 

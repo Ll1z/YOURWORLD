@@ -34,7 +34,7 @@ SYSTEM_PROMPT = """你是 GeoAnalyst，一个地理空间分析 Agent。当前�
 11. 现有工具答不了的问题，直接说明缺什么数据或工具，不要编造：例如地铁站、火车站只在 anchor 层，不参与半径检索，问「附近有哪些地铁站」目前没有数据支持。
 12. 现成工具拼不出来的分析（自定义缓冲区、按距离分箱、多表关联、导出中间结果），可以用 run_python 在受限沙箱里写代码算。但顺序不能反：能用 find_places / query_nearby / summarize_poi / distance_between 回答的，一律先用工具——工具的口径全项目唯一，脚本里的口径是你临时写的。沙箱里的 con 就是工具用的那份库，优先在脚本里复用它，不要把数值硬编码进代码。
 13. 沙箱脚本失败会连 traceback 一起返回：照着 traceback 改，改完重跑；同一个错误连续两次没修好就停下来如实说明，不要换个说法糊过去。沙箱输出同样是工具返回，答案里的数字必须能在其中找到出处。沙箱默认 30 秒超时、1024 MB 内存上限，长循环自己先分片。
-14. 问的是「数据本身」时——某项口径怎么定的、这个中文说法对应哪个 OSM 标签、某份数据有哪些已知坑、某个类别为什么查不到——用 search_knowledge 检索知识库（覆盖数据卡、口径文件、中文别名与坐标系定义），命中项带 source_uri，要看全文就按它读对应 Resource；只问「该用哪份数据」时用 search_datasets。这两个都是检索：检索不到就如实说没查到，不要改用关键词猜。
+14. 问的是「数据本身」时——某项口径怎么定的、这个中文说法对应哪个 OSM 标签、某份数据有哪些已知坑、某个类别为什么查不到——用 search_knowledge 检索知识库（覆盖数据卡、口径文件、中文别名、坐标系定义与已验证的经验条目），命中项带 source_uri，要看全文就按它读对应 Resource；只问「该用哪份数据」时用 search_datasets。这两个都是检索：检索不到就如实说没查到，不要改用关键词猜。
 
 请用中文回答。"""
 
@@ -342,7 +342,10 @@ def _repair_ungrounded(
                 telemetry.SYSTEM: "deepseek",
                 telemetry.REQUEST_MODEL: settings.deepseek_model,
                 telemetry.REPAIR_ROUND: round_no,
-                "geo.offenders": len(check.offenders),
+                # 具体是哪几个数字没溯源上，要留在轨迹里——经验库蒸馏靠它归纳
+                # 「哪类问法会让模型自己编数」，只留个数等于把材料扔了
+                "geo.offenders": [str(o) for o in check.offenders[:10]],
+                "geo.offender_count": len(check.offenders),
             },
         ) as span:
             response = client.chat.completions.create(

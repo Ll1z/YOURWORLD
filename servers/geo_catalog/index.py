@@ -134,6 +134,19 @@ def chunks() -> list[dict]:
         for alias, reason in (doc.get("not_available") or {}).items():
             out.append(_chunk(f"unavailable#{alias}", "alias_unavailable", uri,
                               f"「{alias}」为什么查不到", str(reason)))
+
+    # 经验库：只收已确认的 lessons，候选（candidates）不进索引——它们还没写 statement，
+    # 索引进去就会和「已验证的结论」混在同一个 top-k 里，检索质量与可信度一起下降
+    experience = KNOWLEDGE / "experience" / "lessons.json"
+    if experience.exists():
+        doc = json.loads(experience.read_text(encoding="utf-8"))
+        uri = "knowledge://experience"
+        for lesson in doc.get("lessons") or []:
+            out.append(_chunk(
+                f"experience#{lesson['signature']}", "experience", uri,
+                lesson.get("statement", lesson["signature"]),
+                _flatten({"为什么": lesson.get("why"), "出处": lesson.get("evidence"),
+                          "来源": lesson.get("sources"), "类型": lesson.get("kind")})))
     return out
 
 

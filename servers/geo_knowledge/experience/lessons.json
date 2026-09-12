@@ -1,0 +1,138 @@
+{
+ "id": "experience",
+ "version": 1,
+ "name": "程序性记忆（经验库）",
+ "updated_at": "2026-09-12T11:09:55Z",
+ "how_to_use": [
+  "lessons 是已确认的经验：每条都能追到一次实测或一份口径文件，可以当结论用。",
+  "candidates 是 scripts/distill_experience.py 从运行轨迹里抽出来的候选：只有出现次数与例子，还没有 statement，不要当结论用。",
+  "signature 是去重键，也是蒸馏脚本累积次数的依据；人工写的、机器认不出来的条目用 manual: 前缀。"
+ ],
+ "lessons": [
+  {
+   "signature": "manual:center-not-representative-point",
+   "kind": "center",
+   "statement": "半径查询的中心必须是可命名的地点或调用方给的坐标，不能拿行政区的几何代表点当圆心",
+   "why": "几何代表点是多边形的产物，不对应任何一个真实地点。海淀区实测：以几何代表点为圆心问「800 米内有哪些便利店」，返回 0 个——那是几何产物，不是事实。",
+   "evidence": "口径见 servers/geo_knowledge/anchor_scope.json；AGENTS.md 硬性规则",
+   "sources": [
+    "AGENTS.md",
+    "servers/geo_knowledge/anchor_scope.json"
+   ],
+   "origin": "人工",
+   "occurrences": 1,
+   "first_seen": "2026-09-12",
+   "last_seen": "2026-09-12"
+  },
+  {
+   "signature": "manual:grounding-no-list-index",
+   "kind": "grounding",
+   "statement": "回答里不要给表格序号列或列表编号：序号不是数据，会被数值溯源判成凭空生成的数字",
+   "why": "溯源检查只认工具返回里出现过的数字。序号是模型自己排出来的，列表越长越容易被判失败——这一条是实测被打回后才补的。",
+   "evidence": "agent 层评测出现过「回答未通过数值溯源自检」并要求重写",
+   "sources": [
+    "agent/selfcheck.py",
+    "agent/loop.py"
+   ],
+   "origin": "人工",
+   "occurrences": 1,
+   "first_seen": "2026-09-12",
+   "last_seen": "2026-09-12"
+  },
+  {
+   "signature": "tool_error:query_nearby:不认识的类别",
+   "kind": "tool_error",
+   "statement": "工具报「不认识的类别」时，只许按它给出的近似建议改写，或者向用户澄清；不许换一个能查的类别去凑答案",
+   "why": "「马甸桥 10 公里内有哪些高校」被答成一堆医院，就是换类别凑答案的结果。工具报错里带着近似的合法类别，照着改即可。",
+   "evidence": "AGENTS.md 硬性规则；SYSTEM_PROMPT 第 9 条；评测用例 agg-003 的来历",
+   "sources": [
+    "AGENTS.md",
+    "agent/loop.py",
+    "servers/geo_compute/query.py"
+   ],
+   "origin": "人工",
+   "occurrences": 1,
+   "first_seen": "2026-09-12",
+   "last_seen": "2026-09-12"
+  },
+  {
+   "signature": "manual:anchor-not-searchable",
+   "kind": "scope",
+   "statement": "被问「附近有哪些地铁站」时如实说没有数据支持：地铁站、火车站在 anchor 层，只用于定位，不参与半径设施检索",
+   "why": "query_nearby 只覆盖 poi_point 与 poi_area 两层，railway 标签不在这两层里。拿别的类别代替就是答非所问。",
+   "evidence": "实测报错「地铁站 不在可查询范围内」；口径见 servers/geo_knowledge/anchor_scope.json",
+   "sources": [
+    "servers/geo_knowledge/anchor_scope.json",
+    "servers/geo_compute/query.py"
+   ],
+   "origin": "人工",
+   "occurrences": 1,
+   "first_seen": "2026-09-12",
+   "last_seen": "2026-09-12"
+  },
+  {
+   "signature": "manual:grounding-pool-excludes-catalogs",
+   "kind": "grounding",
+   "statement": "数值溯源的来源池不装目录型清单（类别目录、数据集清单、知识库索引规模）",
+   "why": "那些数字在描述别的对象，留在池子里会让任意小整数都能找到「出处」——实测「4 家咖啡馆」这种凭空计数，就是被类别目录里的 4 兜住的。",
+   "evidence": "agent/mcp_hub.py 的 GROUNDING_EXCLUDE",
+   "sources": [
+    "agent/mcp_hub.py",
+    "agent/loop.py"
+   ],
+   "origin": "人工",
+   "occurrences": 1,
+   "first_seen": "2026-09-12",
+   "last_seen": "2026-09-12"
+  },
+  {
+   "signature": "manual:retrieval-cjk-bigram",
+   "kind": "retrieval",
+   "statement": "中文检索必须自己按字符 bigram 切词：DuckDB FTS 不带中文分词器，直接索引中文几乎检索不到",
+   "why": "实测不加分词时检索「医院」返回 0；改成字符 bigram（Lucene CJKBigramFilter 的做法）后恢复正常，ASCII 仍按词切。",
+   "evidence": "servers/geo_catalog/index.py 的 tokenize()",
+   "sources": [
+    "servers/geo_catalog/index.py"
+   ],
+   "origin": "人工",
+   "occurrences": 1,
+   "first_seen": "2026-09-12",
+   "last_seen": "2026-09-12"
+  },
+  {
+   "signature": "manual:retrieval-dense-thresholds",
+   "kind": "retrieval",
+   "statement": "向量召回要卡两道阈值：绝对值下限加「与本次最高分的差」",
+   "why": "bge 对无关文本的相似度基线偏高（实测完全无关的问句也有 0.46），只卡绝对值会让无关语料块塞满 top-k、把 RRF 融合结果稀释掉。",
+   "evidence": "servers/geo_catalog/index.py 的 MIN_SIM / SIM_MARGIN",
+   "sources": [
+    "servers/geo_catalog/index.py"
+   ],
+   "origin": "人工",
+   "occurrences": 1,
+   "first_seen": "2026-09-12",
+   "last_seen": "2026-09-12"
+  }
+ ],
+ "candidates": [
+  {
+   "signature": "tool_error:query_nearby:未知口径预设university",
+   "kind": "tool_error",
+   "summary": "query_nearby 报错，随后重试成功",
+   "origin": "蒸馏",
+   "occurrences": 1,
+   "first_seen": "2026-09-12T11:09:55Z",
+   "last_seen": "2026-09-12T11:09:55Z",
+   "sources": [
+    "agent:agent_20260912T095921Z"
+   ],
+   "examples": [
+    {
+     "where": "agent:agent_20260912T095921Z",
+     "detail": "{'text': \"Error executing tool query_nearby: 未知口径预设 university；可用: ['convenience', 'hospital_only', 'medical']\"}",
+     "fix": "{\"lon\": 116.3758342, \"lat\": 39.9668285, \"radius_m\": 10000, \"preset\": \"medical\"}"
+    }
+   ]
+  }
+ ]
+}

@@ -232,6 +232,15 @@
 - 观测不是跑通的前提：没装 SDK 或出口配错只记一条告警，报告里单列「观测」段
 - 顺带发现：`gen_ai.response.model` 显示 DeepSeek 把 `deepseek-chat` 路由到了 `deepseek-flash`——这种「请求模型 ≠ 实际模型」以前是看不见的
 
+### ④-2 经验库（程序性记忆）
+
+- 落地形式：`servers/geo_knowledge/experience/lessons.json`，分 lessons（已确认）与 candidates（脚本抽出的候选）两块
+- `scripts/distill_experience.py` 扫全部运行轨迹（`eval/runs/**/trace.json` 与 `data/processed/results/agent_*/trace.json`），按 signature 归并并累加出现次数：工具报错后重试成功的（tool_error）、数值溯源打回重写的（grounding）、跑满步数上限的（steps_exhausted）
+- 为什么是规则抽取而不是让模型写小结：经验条必须能追到具体哪一次运行。模型写的教训读起来更顺，但无法验证、也累计不了「同一个坑踩了几次」——而出现次数正是经验值的全部来源。模型该做的是用这些经验，不是编它们
+- 消费路径：已确认的 lessons 会被切块索引进 `knowledge.duckdb`（`kind=experience`），`search_knowledge` 检索得到；candidates 不索引，避免未验证的说法混进 top-k
+- 顺带把 `geo.offenders` 从「个数」改成「具体是哪几个数字」：只记个数等于把蒸馏的材料扔了
+- 现状：现有轨迹只抽出 1 条候选（`tool_error:query_nearby:未知口径预设university`），因为评测集本身已经跑得比较干净；经验库要长起来得靠后续运行。索引语料从 141 块涨到 148 块（+7 条人工确认的经验）
+
 ### ③ 混合检索落地（知识库问答的数据侧）
 
 - 语料切块（141 块）：数据卡按「整卡 + schema + 每条已知坑」切，口径文件按顶层小节切，`aliases.json` 的 80 条中文别名与 5 条「查不到」说明各算一块

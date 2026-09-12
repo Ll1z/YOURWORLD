@@ -17,7 +17,7 @@ CARDS = ROOT / "servers" / "geo_catalog" / "cards"
 
 mcp = MCPServer(
     name="geo-catalog",
-    version="0.2.0",
+    version="0.3.0",
     description="数据目录与知识库：登记有哪些数据集、各自是什么坐标系、有哪些已知坑，"
                 "并混合检索数据卡、口径文件、类别中文别名与坐标系定义。",
 )
@@ -102,7 +102,8 @@ def search_knowledge(query: str, limit: int = 5, kinds: list[str] | None = None,
     用于回答「口径是怎么定的」「地铁站为什么查不到」「这个中文说法对应哪个 OSM 标签」
     「坐标系有哪些坑」这类问题。命中项带 source_uri，要看全文就按它读对应 Resource。
     kinds 可按语料类型过滤：dataset_card / dataset_schema / dataset_pitfall /
-    scope / scope_section / alias / alias_unavailable；dataset_id 限定到某份数据。
+    scope / scope_section / alias / alias_unavailable / experience（已确认的经验条目）；
+    dataset_id 限定到某份数据。
     返回里带 retrieval 段，写明这次各召回了几条候选、融合方式与向量模型。
     """
     return _search(query, limit=limit, kinds=kinds, dataset_id=dataset_id)

@@ -16,8 +16,9 @@ KNOWLEDGE = ROOT / "servers" / "geo_knowledge"
 
 mcp = MCPServer(
     name="geo-knowledge",
-    version="0.1.0",
-    description="地理空间分析的标准、术语与分析口径。回答「这个数按什么口径算」这类问题。",
+    version="0.2.0",
+    description="地理空间分析的标准、术语与分析口径，外加程序性记忆（经验库）。"
+                "回答「这个数按什么口径算」「这个坑踩过没有」这类问题。",
 )
 
 
@@ -66,6 +67,17 @@ def get_category_aliases() -> dict:
 def get_coord_systems() -> dict:
     """读取坐标系与度量口径：存储 CRS、面积与距离的计算方式、已知坐标系偏移。"""
     return json.loads((KNOWLEDGE / "coords" / "systems.json").read_text(encoding="utf-8"))
+
+
+@mcp.resource("knowledge://experience", name="experience",
+              description="程序性记忆：已确认的经验条目（踩过的坑与当时的处理）")
+def get_experience() -> dict:
+    """经验库：lessons 是已确认的（每条都能追到一次实测或一份口径文件），candidates 还没确认。
+
+    candidates 由 scripts/distill_experience.py 从运行轨迹里抽出来，只有出现次数与例子、
+    没有 statement，不要当结论用；确认之后才提升为 lesson。
+    """
+    return json.loads((KNOWLEDGE / "experience" / "lessons.json").read_text(encoding="utf-8"))
 
 
 @mcp.tool()
