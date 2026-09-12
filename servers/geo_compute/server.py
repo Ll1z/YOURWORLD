@@ -22,6 +22,8 @@ mcp = MCPServer(
 
 CRS_NOTE = "存储 CRS EPSG:4326；距离计算 CRS EPSG:32650（UTM 50N，中央经线 117 度）"
 DATA_SOURCE = "OpenStreetMap 北京省级切片 2026-09-11（ODbL 1.0）"
+# compute://categories 只列 >= 该条数的类别，避免上下文被长尾撑爆（校验仍用全量清单）
+CATALOG_MIN_COUNT = 5
 
 NO_CENTER_HINT = (
     "半径查询必须给出明确的查询中心：请传 lon/lat，"
@@ -43,14 +45,25 @@ class PoiHit(BaseModel):
     area_m2: float | None = Field(default=None, description="仅面层：大地线面积，平方米")
 
 
+class CategoryTally(BaseModel):
+    key: str | None = Field(default=None,
+                            description="标签键；null 表示不限键（同值的 amenity/office 都算）")
+    value: str
+    label: str = Field(description="展示用标签，如 amenity=university")
+    count: int = Field(description="命中数；0 表示这类设施在查询范围内确实没有")
+    matched: bool
+
+
 class NearbyResult(BaseModel):
     center_lon: float
     center_lat: float
     center_source: str
     radius_m: float
     district: str | None
-    preset: str
-    categories: list[str]
+    preset: str | None = Field(default=None,
+                               description="本次使用的预设名；用 categories 自由类别时为 null")
+    categories: list[CategoryTally] = Field(
+        description="每个请求类别的命中数明细，含 0 命中——0 是结论本身，不是工具失败")
     count_total: int
     count_point: int
     count_area: int
@@ -134,6 +147,15 @@ def get_schema() -> dict:
         },
         "covered_districts": ["东城区", "西城区", "朝阳区", "丰台区", "海淀区"],
         "presets": query.presets(),
+        "free_categories": "categories 参数可自由指定库里存在的任何类别值（469 个 key×value 组合），"
+                           "不限于上面几个 presets；清单见 compute://categories，"
+                           "中文说法见 knowledge://categories/aliases",
+        "category_rule": {
+            "rule": "类别参数没有默认值；不认识、拼错的类别直接报错并给近似建议",
+            "how": "传 categories（自由类别，中英文皆可）或 preset（常用组合），二选一",
+            "why": "给默认类别会把「想查高校却拿到医院」变成静默替换，看起来像正常结果",
+            "resource": "compute://categories",
+        },
         "primary_key": "(osm_type, osm_id)——way 与 relation 的编号空间独立",
         "center_rule": {
             "rule": "半径查询的中心必须明确、可命名，禁止用行政区几何代表点当圆心",
@@ -142,6 +164,37 @@ def get_schema() -> dict:
             "resource": "knowledge://scope/anchor_scope",
         },
         "note": "仅覆盖上述五区，district 为 null 的记录在五区之外。",
+    }
+
+
+@mcp.resource("compute://categories", name="categories",
+              description="可查询的 POI 类别清单：库内真实存在的 key×value 与计数")
+def get_categories() -> dict:
+    """列出库里真实存在的 POI 类别，按标签键分组。
+
+    只列出现次数 >= CATALOG_MIN_COUNT 的值（5 条，覆盖 99.3% 的记录），避免上下文被长尾
+    撑爆；查询与校验用的是全量清单，长尾值照样能查，拼错才会报错。
+    计数是全库口径（五区内外都算），不是某个半径内的计数。
+    """
+    inv = query.category_inventory()
+    shown = inv[inv["n"] >= CATALOG_MIN_COUNT]
+    by_key: dict[str, dict[str, int]] = {}
+    for key, value, n in zip(shown["category_key"], shown["category_value"], shown["n"]):
+        by_key.setdefault(key, {})[value] = int(n)
+    return {
+        "how_to_use": [
+            "query_nearby / summarize_poi 的 categories 直接收下面的值，或写 'key=value' 精确限定标签键",
+            "中文说法（高校 / 药店 / 公园…）见 knowledge://categories/aliases，由服务端展开，不需要自己猜标签",
+            "category_value 是主分类，一个设施只归一个 key；同名值出现在多个 key 下时，裸值写法会全部计入",
+            "认不出来的类别会直接报错并给近似建议，不会静默返回 0 条",
+        ],
+        "total_combinations": int(len(inv)),
+        "total_records": int(inv["n"].sum()),
+        "shown_min_count": CATALOG_MIN_COUNT,
+        "omitted_values": int(len(inv) - len(shown)),
+        "not_available": sorted(query.load_aliases().get("not_available") or {}),
+        "presets": query.presets(),
+        "by_key": by_key,
     }
 
 
@@ -164,15 +217,23 @@ def find_places(name: str, district: str | None = None, limit: int = 10) -> list
 
 @mcp.tool()
 def query_nearby(lon: float, lat: float, radius_m: float = 1000.0,
-                 district: str | None = None, preset: str = "medical") -> NearbyResult:
+                 district: str | None = None, categories: list[str] | None = None,
+                 preset: str | None = None) -> NearbyResult:
     """查询一个点周围指定半径内有哪些设施，返回按距离升序的明细。
 
     参数：
       lon/lat    查询中心（WGS84 经纬度），必填。手上只有地名时先用 find_places 解析。
       radius_m   半径，米，直线距离。
       district   限定区名（东城区/西城区/朝阳区/丰台区/海淀区），省略则不限。
-      preset     类别口径预设，见 compute://schema，常用 medical（医疗）与 convenience（便利店/超市）。
+      categories 要查什么类别，自由填写，三种写法可混用：
+                   OSM 值    "university"（不限标签键）、"amenity=university"（限定键）
+                   中文说法  "高校"、"药店"、"公园"（映射见 knowledge://categories/aliases）
+                   多个类别  ["高校", "银行"]
+                 可查的值清单见 compute://categories。
+      preset     常用组合的快捷方式（见 compute://schema 的 presets），与 categories 二选一。
 
+    categories 与 preset 都不给会直接报错：本工具没有默认类别。默认一个类别会让
+    「想查高校却拿到医院」变成静默替换，看起来像正常结果。
     中心点必须是明确位置，本工具不会替你猜中心。
     距离在 EPSG:32650（UTM 50N）平面下计算；面层设施以其代表点参与距离计算。
     结果中的 suspected_duplicates 是相距 150 米内的点面配对，疑似同一设施被点面双挂。
@@ -181,8 +242,8 @@ def query_nearby(lon: float, lat: float, radius_m: float = 1000.0,
         raise ToolError(NO_CENTER_HINT)
 
     try:
-        df, _, _ = query.nearby(lon, lat, radius_m, district, preset)
-        categories = query.resolve_categories(preset)
+        specs = query.resolve_categories(categories, preset)
+        df, _, _ = query.nearby(lon, lat, radius_m, district, specs)
     except ValueError as e:
         raise ToolError(str(e)) from e
     dups = query.find_duplicates(df)
@@ -191,7 +252,7 @@ def query_nearby(lon: float, lat: float, radius_m: float = 1000.0,
     return NearbyResult(
         center_lon=lon, center_lat=lat, center_source="调用方给定",
         radius_m=radius_m, district=district, preset=preset,
-        categories=categories,
+        categories=[CategoryTally(**t) for t in query.category_tally(df, specs)],
         count_total=len(df),
         count_point=int((df["layer"] == "poi_point").sum()),
         count_area=int((df["layer"] == "poi_area").sum()),
@@ -203,6 +264,8 @@ def query_nearby(lon: float, lat: float, radius_m: float = 1000.0,
             "直线距离，非路网可达距离，不能用于可达性结论",
             "OSM 完备性取决于志愿者测绘，结论应表述为「OSM 数据显示」",
             "面层以代表点参与距离计算，与设施实际入口可能有偏差",
+            "categories 里 count=0 的类别就是「确实没有」，不要换成别的类别来替代",
+            "只覆盖 poi_point / poi_area 两层；地铁站、火车站等只在 anchor 层，不参与半径检索",
         ],
     )
 
@@ -253,20 +316,32 @@ def distance_between(a_ref: str | None = None, a_lon: float | None = None,
 
 
 @mcp.tool()
-def summarize_poi(district: str | None = None, preset: str = "medical") -> dict:
+def summarize_poi(district: str | None = None, categories: list[str] | None = None,
+                  preset: str | None = None) -> dict:
     """按类别与行政区统计设施数量。不需要中心点，用于回答「某区有多少 X」。
 
     参数：
       district  限定区名，省略则统计全部五区。
-      preset    类别口径预设，常用 medical（医疗）与 convenience（便利店/超市）。
+      categories 要统计的类别，写法与 query_nearby 相同（自由类别 / key=value / 中文说法），
+                 可给多个，清单见 compute://categories，中文映射见 knowledge://categories/aliases。
+      preset    常用组合的快捷方式，与 categories 二选一。
 
+    两个都不给会直接报错，本工具没有默认类别。
+    返回里的 category_tally 是每个请求类别的计数，count=0 就是「这一类没有」。
     计数采用 poi_scope 口径：点层与面层取并集、按 (osm_type, osm_id) 唯一、不做几何去重。
     因此同一设施若被点面双挂会被计两次，实测噪声约 2.6%。
     """
     try:
-        return query.summarize(district, preset)
+        specs = query.resolve_categories(categories, preset)
+        out = query.summarize(district, specs)
     except ValueError as e:
         raise ToolError(str(e)) from e
+    return {**out, "preset": preset, "crs_note": CRS_NOTE,
+            "caveats": [
+                "OSM 完备性取决于志愿者测绘，结论应表述为「OSM 数据显示」",
+                "category_tally 里 count=0 的类别就是「没有」，不要换成别的类别来替代",
+                "五区外的 POI district 为 null，统计不加 district 时不计入",
+            ]}
 
 
 @mcp.tool()

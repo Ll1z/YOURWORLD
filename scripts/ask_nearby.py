@@ -54,18 +54,23 @@ def main():
     ap.add_argument("--anchor", default=None, help="地名关键词，用 find_places 解析成坐标")
     ap.add_argument("--district", default=None, help="限定区名；省略则不限")
     ap.add_argument("--radius", type=float, default=1000.0, help="半径（米，直线距离）")
-    ap.add_argument("--preset", default="medical", help="口径预设，见 poi_scope.json")
+    ap.add_argument("--preset", default=None, help="口径预设（常用组合），见 poi_scope.json")
+    ap.add_argument("--category", action="append", default=None,
+                    help="类别，可重复给：--category 高校 --category amenity=bank；"
+                         "中英文皆可，别名见 servers/geo_knowledge/categories/aliases.json")
     ap.add_argument("--outdir", default=os.path.join("data", "processed", "results"))
     args = ap.parse_args()
 
     scope = query.load_scope()
     try:
-        cats = query.resolve_categories(args.preset)
+        specs = query.resolve_categories(args.category, args.preset)
     except ValueError as e:
         raise SystemExit(str(e)) from e
+    cats = [s.label for s in specs]
+    cat_arg = "、".join(args.category) if args.category else args.preset
 
     lon, lat, center_src, candidates = resolve_center(args)
-    df, sql, params = query.nearby(lon, lat, args.radius, args.district, args.preset)
+    df, sql, params = query.nearby(lon, lat, args.radius, args.district, specs)
 
     gdf = gpd.GeoDataFrame(df.drop(columns=["wkt"]).copy(),
                            geometry=shapely.from_wkt(df["wkt"].values), crs="EPSG:4326")
@@ -88,7 +93,7 @@ def main():
     top = df.head(8)
 
     lines = []
-    lines.append(f"# 查询报告：{scope_txt} · 半径 {args.radius:.0f} m 内的「{args.preset}」类设施")
+    lines.append(f"# 查询报告：{scope_txt} · 半径 {args.radius:.0f} m 内的「{cat_arg}」类设施")
     lines.append("")
     lines.append(f"生成时间（UTC）：{ts}")
     lines.append("")
@@ -100,7 +105,7 @@ def main():
     lines.append(f"| 中心点来源 | {center_src} |")
     lines.append(f"| 半径 | {args.radius:.0f} m（直线距离） |")
     lines.append(f"| 范围限定 | {scope_txt} |")
-    lines.append(f"| 类别预设 | {args.preset} = {cats} |")
+    lines.append(f"| 类别 | {cat_arg} = {cats} |")
     lines.append("")
     if candidates:
         lines.append("## 地名解析候选")
@@ -133,7 +138,8 @@ def main():
     lines.append("## 计算方法")
     lines.append("")
     lines.append("1. 中心点由 EPSG:4326 经 pyproj 投影到 EPSG:32650")
-    lines.append("2. 在 poi_point 与 poi_area 两表中分别按 district 与 category_value 过滤")
+    lines.append("2. 在 poi_point 与 poi_area 两表中分别按 district 与类别过滤"
+                 "（category_value，或 category_key + category_value）")
     lines.append(f"3. 用平面欧氏距离筛出 <= {args.radius:.0f} m 的记录")
     lines.append("4. 两层结果取并集，以 (osm_type, osm_id) 唯一标识，不做几何去重（理由见口径文件）")
     lines.append("5. 面层以其 point_on_surface 代表点参与距离计算")
@@ -142,6 +148,10 @@ def main():
     lines.append("## 结果")
     lines.append("")
     lines.append(f"命中 **{len(df)}** 个（点层 {n_pt}，面层 {n_ar}）。")
+    lines.append("")
+    for item in query.category_tally(df, specs):
+        tail = "（本范围内一个都没有）" if item["count"] == 0 else ""
+        lines.append(f"- `{item['label']}`：{item['count']} 个{tail}")
     lines.append("")
     lines.append("| 距离(m) | 层 | 名称 | 类别 | 所属区 |")
     lines.append("|---|---|---|---|---|")

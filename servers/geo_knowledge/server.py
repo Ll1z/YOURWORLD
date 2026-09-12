@@ -27,6 +27,8 @@ def list_scopes() -> dict:
     items = []
     for p in sorted(KNOWLEDGE.glob("*.json")):
         d = json.loads(p.read_text(encoding="utf-8"))
+        if not d.get("id") or not d.get("name"):
+            continue  # 这个目录不只放口径文件，缺 id/name 的不是口径
         items.append({"id": d.get("id"), "name": d.get("name"), "version": d.get("version"),
                       "applies_to": d.get("applies_to", []), "uri": f"knowledge://scope/{d.get('id')}"})
     p = KNOWLEDGE / "coords" / "systems.json"
@@ -42,7 +44,21 @@ def get_scope(scope_id: str) -> dict:
     p = next((q for q in KNOWLEDGE.glob("*.json") if q.stem == scope_id), None)
     if p is None:
         raise ResourceNotFoundError(f"未登记的口径: {scope_id}")
-    return json.loads(p.read_text(encoding="utf-8"))
+    scope = json.loads(p.read_text(encoding="utf-8"))
+    if not scope.get("id"):
+        raise ResourceNotFoundError(f"未登记的口径: {scope_id}")
+    return scope
+
+
+@mcp.resource("knowledge://categories/aliases", name="category-aliases",
+              description="POI 类别的中文别名表，以及库中查不到的类别（如地铁站）及原因")
+def get_category_aliases() -> dict:
+    """中文说法 → OSM 类别的映射，由 geo_compute 在解析 categories 参数时展开。
+
+    别名属于术语层（「高校」对应哪些 OSM 值、OSM 的 school 不区分中小学），
+    因此放在 knowledge 侧，而不是散落进查询代码。
+    """
+    return json.loads((KNOWLEDGE / "categories" / "aliases.json").read_text(encoding="utf-8"))
 
 
 @mcp.resource("knowledge://coords/systems", name="coordinate-systems",

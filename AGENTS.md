@@ -39,6 +39,7 @@
 - 数值结论（面积、距离、数量、排名）必须由代码算出，LLM 不得直接生成数字
 - 任何空间运算先显式声明 CRS；禁止拿经纬度直接算几何量。面积一律用大地线面积（`pyproj.Geod.geometry_area_perimeter`，椭球面精确、无投影变形）；距离与缓冲区用 UTM 50N（EPSG:32650，中央经线 117°E 覆盖北京）
 - 半径查询必须先有明确、可命名的中心，和路径规划要先选起点同理：中心要么由调用方给坐标，要么由 `find_places` 解析地名得到。**禁止拿行政区几何代表点（point_on_surface）当圆心**——海淀区实测，以几何代表点为圆心问「800 米内有哪些便利店」会得到 0 个，那是几何产物不是事实。口径见 `servers/geo_knowledge/anchor_scope.json`
+- 类别查询不设默认类别：`query_nearby` / `summarize_poi` 的类别必须由调用方给定，认不出来就报错并给近似建议，**绝不返回 0 条**（0 条要留给「真的没有」）。可查类别是库内真实存在的 `(category_key, category_value)` 组合（469 个，见 `compute://categories`），中文说法（高校 / 药店 / 公园…）在 `servers/geo_knowledge/categories/aliases.json`，由 `query.expand_category` 单点展开——默认值会把「想查 A 却拿到 B」变成静默替换
 - 每个数据集必须配一张数据卡片（dataset card），字段规范见 `HANDOFF.md`
 - MCP 分工：Resource 承载上下文（数据卡、schema、字典），Tool 承载动作与计算，不把一切都做成 Tool
 - 空间对象查询走空间索引（R-tree / H3 网格），不用向量检索做空间过滤
@@ -52,13 +53,13 @@ Stage 1 骨架已于 2026-09-12 建立，当前结构：
 ```
 servers/geo_catalog/           MCP：数据目录 + 混合检索；数据卡片存 cards/
 servers/geo_compute/           MCP：DuckDB-spatial + 沙箱执行 + 出图
-servers/geo_knowledge/         MCP：标准 / 术语 / 方法库；坐标系口径与纠偏在 coords/
+servers/geo_knowledge/         MCP：标准 / 术语 / 方法库；坐标系口径与纠偏在 coords/，类别中文别名在 categories/
 agent/                         mcp_hub（聚合三个 MCP Server）+ loop（裸循环）+ selfcheck（空间自检）+ config
 web/                           FastAPI 薄壳（server.py）与 Cesium 前端（index.html），只消费 agent/report.py 的产物
 sandbox/                       代码执行运行目录（每次运行独立子目录）
 eval/                          任务集 + 指标 + 消融实验
 data/                          样例数据与索引；raw 与 processed 默认不入库，地基数据走 .gitignore 白名单
-scripts/                       一次性数据准备与验证脚本
+scripts/                       一次性数据准备与验证脚本；类别别名对库校验见 check_categories.py
 HANDOFF/                       项目交接包（HANDOFF.md、原始会话记录、打包 zip）
 ```
 
@@ -80,8 +81,8 @@ Agent 循环跑在 `web/server.py` 里的独立后台事件循环中：MCP stdio
 
 中心点的选择权留在界面上：`GET /api/places` 不经过 LLM 直接检索地名候选，候选同时画到地图与列表，两处都可点选。点选结果作为一条 clarification 随问题一起送给 Agent，并写进 `report.md` 与 `trace.json`——事后的报告里能看出「当时在几个同名地点里选了哪一个」。数值溯源把用户输入与 Resource 上下文、工具返回并列为可信来源，否则用户自己给的坐标会被判成幻觉。
 
-查询口径只有一处实现：`servers/geo_compute/query.py`。MCP Tool `query_nearby` 与 `scripts/ask_nearby.py` 都调用它，禁止在别处重写 SQL。
+查询口径只有一处实现：`servers/geo_compute/query.py`。MCP Tool `query_nearby` 与 `scripts/ask_nearby.py` 都调用它，禁止在别处重写 SQL。类别的解析与展开（含中文别名、`key=value`、近似建议）同样只在 `query.resolve_categories` / `query.expand_category` 一处，服务端只做 `ToolError` 包装。
 
 空间自检器（`agent/selfcheck.py`）做五项检查：CRS、单位、几何有效性、量级自洽，以及**数值溯源**——最终回答里的每个数字都必须能在工具返回中找到出处。调用 `distance_between` 时额外做一次距离互证：UTM 平面距离与椭球面大地线距离必须互相印证（容差按舍入误差推导）。溯源不通过时循环会把回答打回重写（最多 2 轮）。实测模型确实会在叙述里自行估算两个设施之间的距离，只在提示词里禁止是不够的。
 
-辅助脚本：`calibrate_gcj02.py`（纠偏算法校准）、`check_boundaries.py`（边界完整性体检）、`analyze_poi_overlap.py`（点面重复量化）
+辅助脚本：`calibrate_gcj02.py`（纠偏算法校准）、`check_boundaries.py`（边界完整性体检）、`analyze_poi_overlap.py`（点面重复量化）、`check_categories.py`（类别别名表逐条对库校验）

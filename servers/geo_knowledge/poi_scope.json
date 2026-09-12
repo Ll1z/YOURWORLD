@@ -1,7 +1,7 @@
 {
   "id": "poi-presence-scope",
   "name": "POI 存在性查询口径",
-  "version": "1.0",
+  "version": "1.1",
   "effective_from": "2026-09-12",
   "applies_to": ["某点周围有什么", "某范围内有哪些 X", "某区有哪些 X"],
   "question": "OSM 中同一类设施既有挂点(node)也有挂面(way/relation)，如何计数才不重不漏？",
@@ -31,17 +31,27 @@
     "primary": "category_key / category_value 为主分类，按 PRIORITY 顺序取第一个命中的键",
     "priority_order": ["amenity", "healthcare", "shop", "tourism", "office", "leisure", "craft", "historic", "sport"],
     "note": "非主分类的其它标签完整保留在 other_tags 中，自定义口径可绕过主分类直接用 other_tags 过滤",
+    "how_to_filter": {
+      "free_categories": "类别参数直接收库内任意 category_value，也可写 key=value 限定标签键。全库 469 个 key×value 组合见 compute://categories。",
+      "aliases": "中文说法（高校 / 药店 / 公园…）由 categories/aliases.json 展开成 OSM 值，展开实现在 query.py 的 expand_category，只有这一处。",
+      "no_default": "类别参数不设默认值。默认一类设施会把「想查 A 却拿到 B」变成静默替换，工具宁可报错。",
+      "unknown_category": "未知类别（拼错、库里没有、或不在可查范围内）一律报错并给近似建议，不返回 0 条——0 条要留给「真的没有」这个结论。",
+      "zero_result": "某个类别 0 命中时，query_nearby 的 category_tally 会带着 count=0 回来，0 是结论本身，不是工具失败。"
+    },
     "presets": {
       "medical": ["hospital", "clinic", "doctors", "pharmacy"],
       "hospital_only": ["hospital"],
       "convenience": ["convenience", "supermarket"]
-    }
+    },
+    "presets_note": "presets 只是常用组合的快捷方式，不是可查类别的全集；新类别不必新增 preset"
   },
 
   "known_limitations": [
     "OSM 完备性取决于志愿者测绘，郊区与新增设施覆盖不全，结论应表述为「OSM 数据显示」而非「事实上」。",
     "面层面积用大地线面积；用面积做筛选时注意与边界数据的来源差异。",
     "五区外的 POI 保留在数据中（district 为 null），查询必须显式限定范围。",
-    "POI 名称缺失率不低，按名称去重或聚合都不可靠。"
+    "POI 名称缺失率不低，按名称去重或聚合都不可靠。",
+    "半径查询只覆盖 poi_point 与 poi_area 两层：地铁站、火车站等地名对象在 anchor 层，只用于定位，不参与设施检索。",
+    "类别来自 OSM 标签，不带学段、等级等本地语义（如 school 不区分中学与小学），结论里必须说明这一层局限。"
   ]
 }

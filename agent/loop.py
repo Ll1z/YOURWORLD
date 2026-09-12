@@ -27,8 +27,10 @@ SYSTEM_PROMPT = """你是 GeoAnalyst，一个地理空间分析 Agent。当前�
 5. 结论一律表述为「OSM 数据显示」，因为 OSM 的完备性取决于志愿者测绘。
 6. 距离是 UTM 平面下的直线距离，不是路网可达距离，不得据此下可达性结论。
 7. 「A 和 B 相距多远」必须调 distance_between 计算，不要拿坐标自行估算。
-8. 工具报错时最多换一次参数重试；仍失败就如实说明失败原因，不要绕过。
-9. 现有工具答不了的问题，直接说明缺什么数据或工具，不要编造。
+8. 工具报错时，只允许做同义修正（半径、坐标写法、地名写法）后重试一次；参数含义一旦改变就不再是「重试」，而是换了一个问题。仍失败就如实说明失败原因，不要绕过。
+9. 查什么类别只能来自三处：compute://categories 的类别清单、knowledge://categories/aliases 的中文说法、用户原话里的类别词。工具报「不认识的类别」时，改用它给出的近似建议或向用户澄清，禁止换成另一个类别去凑答案——「马甸桥 10 公里内有哪些高校」答成一堆医院，就是这么来的。
+10. 某个类别 0 命中就是 0：如实说「OSM 数据里没有」，并说清查的是哪个类别，不要用别的类别替代，也不要把 0 说成「工具没能给出结果」。
+11. 现有工具答不了的问题，直接说明缺什么数据或工具，不要编造：例如地铁站、火车站只在 anchor 层，不参与半径检索，问「附近有哪些地铁站」目前没有数据支持。
 
 请用中文回答。"""
 
@@ -39,7 +41,8 @@ CLARIFICATION_TEMPLATE = ("[用户在界面上确认了{note}。直接用它，"
 
 
 def _context_block(context: dict) -> str:
-    parts = ["以下是从 MCP Resource 预加载的上下文（可用工具与表结构、数据目录、计数口径、坐标系口径）："]
+    parts = ["以下是从 MCP Resource 预加载的上下文（可用工具与表结构、可查类别与中文别名、"
+             "数据目录、计数口径、坐标系口径）："]
     for uri, payload in context.items():
         parts.append(f"\n### {uri}\n```json\n{json.dumps(payload, ensure_ascii=False, indent=1)}\n```")
     return "\n".join(parts)
@@ -94,6 +97,28 @@ def _truncate(payload: Any, limit: int = 4000) -> Any:
     if len(text) <= limit:
         return payload
     return {"_truncated": True, "_original_chars": len(text), "head": text[:limit]}
+
+
+# 回喂给模型的工具结果上限。超长时必须显式说明被截断：静默截断会让模型以为
+# 自己拿到了全部明细，进而说出「完整明细已由工具返回」这种不成立的话。
+TOOL_RESULT_LIMIT = 20000
+
+
+def _tool_content(ok: bool, error: str | None, payload: Any) -> str:
+    body = json.dumps({"ok": ok, "error": error, "result": payload},
+                      ensure_ascii=False, default=str)
+    if len(body) <= TOOL_RESULT_LIMIT:
+        return body
+    return json.dumps({
+        "ok": ok,
+        "error": error,
+        "truncated": True,
+        "original_chars": len(body),
+        "note": f"结果过长，只回喂前 {TOOL_RESULT_LIMIT} 个字符。计数类字段（count_total、"
+                "count_point、count_area 与 categories 里的 count）是完整的，明细列表不是。"
+                "回答时要说明「明细未全部列出」，不要写成「完整明细已由工具返回」。",
+        "head": body[:TOOL_RESULT_LIMIT],
+    }, ensure_ascii=False)
 
 
 def grounding_pool(question: str, clarification: str | None, context: dict,
@@ -177,8 +202,7 @@ async def run(
             messages.append({
                 "role": "tool",
                 "tool_call_id": call.id,
-                "content": json.dumps({"ok": ok, "error": error, "result": payload},
-                                      ensure_ascii=False, default=str)[:20000],
+                "content": _tool_content(ok, error, payload),
             })
 
     repair_rounds = 0
