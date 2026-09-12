@@ -60,3 +60,14 @@ HANDOFF/                       项目交接包（HANDOFF.md、原始会话记录
 ```
 
 servers/ 下的包以可编辑模式安装（hatchling），全项目可直接调用，例如 `from geo_knowledge.coords.gcj02 import gcj02_to_wgs84`。
+
+## 运行入口
+
+数据链路（按顺序执行）：
+
+1. `scripts/build_district_boundaries.py` —— 生成五区 WGS84 行政边界，并按需补齐西城区
+2. `scripts/build_poi.py` —— 从 OSM 切片抽取 POI 点层与面层，标注所属区
+3. `scripts/build_duckdb.py` —— 装载 DuckDB 并建立 R-tree 空间索引
+4. `scripts/ask_nearby.py` —— 端到端查询，产出 result.geojson / result.csv / query.sql / report.md
+
+辅助脚本：`calibrate_gcj02.py`（纠偏算法校准）、`check_boundaries.py`（边界完整性体检）、`analyze_poi_overlap.py`（点面重复量化）
