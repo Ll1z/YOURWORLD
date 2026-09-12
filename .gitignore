@@ -28,6 +28,9 @@ data/processed/*
 *.duckdb.wal
 *.gpkg
 
+# 本地 embedding 模型缓存（fastembed 的 bge 权重，90MB 量级，可重新下载）
+data/models/
+
 # 例外：充当系统原子单元的地基数据入库
 !data/processed/districts_wgs84.geojson
 !data/processed/districts_wgs84.gpkg

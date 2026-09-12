@@ -150,7 +150,7 @@
 
 - DeepSeek 具体模型与档位（拿到 Key 后确认，模型名写进 `.env`）
 - 北京样例数据范围：先做哪 2 到 3 个区县
-- embedding 选型：新设备 16GB 可直接上 bge-m3，也可先用 bge-small-zh 提速（建议先小后大做对比，正好是消融实验的一部分）
+- embedding 选型（已定）：`fastembed` + `BAAI/bge-small-zh-v1.5`，512 维，ONNX CPU，不需要 torch。bge-m3 等更大模型留给后续消融对比
 - 是否安装 Docker Desktop（装了就能直接上 L2 沙箱）
 - 观测方案：OTel + Langfuse 还是自建 SQLite 轨迹表（Stage 2 再定）
 
@@ -205,7 +205,7 @@
 ### 已完成
 
 - 数据：五区（东城 / 西城 / 海淀 / 朝阳 / 丰台）行政边界 + OSM 点面两层 POI，装载进单文件 `data/processed/geo.duckdb` 并建 R-tree 空间索引；五区大地线面积合计约 1294 km²
-- MCP：`geo_catalog` / `geo_compute` / `geo_knowledge` 三个 Server 全部就位，合计 8 个 Tool、8 个 Resource；`scripts/mcp_smoke_test.py` 全量校验零失败
+- MCP：`geo_catalog` / `geo_compute` / `geo_knowledge` 三个 Server 全部就位，合计 10 个 Tool、7 个 Resource（另有 2 个 Resource 模板）；`scripts/mcp_smoke_test.py` 全量校验零失败
 - Agent：裸循环（`agent/loop.py`）+ 五项空间自检器（CRS / 单位 / 几何有效性 / 量级自洽 / 数值溯源），溯源不通过会把回答打回重写
 - Web：`web/` 的 FastAPI 薄壳 + Cesium 前端已消费 `visual_hints.json`，可飞相机、标命中、画半径圈与两点连线；中心点候选在界面与地图两处都能点选
 - 沙箱与 CodeAct：`geo_compute/sandbox.py`（L1 受限子进程，后端可替换）+ `run_python` 工具 + `scripts/sandbox_smoke_test.py`（11 条护栏验收）；Agent 提示词加了「工具优先、现成工具拼不出来才写代码」「照 traceback 改、同一个错两次就停」两条
@@ -222,4 +222,14 @@
 
 ### 另一条教训：溯源池不能装目录
 
-溯源一开始把预加载的类别目录也当成可信来源，于是「4 家咖啡馆」这种凭空计数被目录里某个类别的 4 兜住——140 个与本次提问无关的数字，让小整数几乎必然「有出处」。现在目录型清单（类别目录、数据集清单）一律不进溯源池，单位换算的容差也按数值量级给（4326 ÷ 1000 不该把 4 判成有出处）。收紧之后重跑同一道题，模型放弃了自己数，改用 `run_python` 分档——规则和围栏是一起起作用的。
+溯源一开始把预加载的类别目录也当成可信来源，于是「4 家咖啡馆」这种凭空计数被目录里某个类别的 4 兜住——140 个与本次提问无关的数字，让小整数几乎必然「有出处」。现在目录型清单（类别目录、数据集清单、知识库索引规模）一律不进溯源池，单位换算的容差也按数值量级给（4326 ÷ 1000 不该把 4 判成有出处）。收紧之后重跑同一道题，模型放弃了自己数，改用 `run_python` 分档——规则和围栏是一起起作用的。
+
+### ③ 混合检索落地（知识库问答的数据侧）
+
+- 语料切块（141 块）：数据卡按「整卡 + schema + 每条已知坑」切，口径文件按顶层小节切，`aliases.json` 的 80 条中文别名与 5 条「查不到」说明各算一块
+- 索引：单文件 `data/processed/knowledge.duckdb`，FTS(BM25) 与 HNSW(cosine) 双路召回后按 RRF(k=60) 融合；构建入口 `scripts/build_knowledge_index.py`，冷启动到建完约 4 秒
+- 中文分词：DuckDB FTS 不带中文分词器，直接索引中文几乎检索不到（测「医院」返回 0）。改按字符 bigram 切（Lucene CJKBigramFilter 的做法），ASCII 走 `[a-z0-9_]+`，检索立刻正常
+- embedding：`fastembed` + `BAAI/bge-small-zh-v1.5`（512 维，ONNX CPU，不需要 torch），权重缓存在 `data/models/fastembed/`；本机 `huggingface.co` 不通（20 秒超时），改走 `hf-mirror.com`
+- dense 侧双阈值：bge 对无关文本的相似度基线偏高（实测完全无关的问句也有 0.46），只设绝对阈值会让无关语料块塞满 top-20 并稀释 RRF。现在用 `dense_floor = max(MIN_SIM, top1 - SIM_MARGIN)`，两个阈值一起兜
+- 工具面：`search_datasets`（只在数据卡类语料里检索）与 `search_knowledge`（全语料，可按 kinds / dataset_id 过滤）都返回带 `source_uri` 的命中，要全文就按 URI 读 Resource；索引没建好时直接报 ToolError，**不退回关键词匹配**——静默降级等于换了一套口径
+- Agent 侧：`catalog://knowledge`（索引规模与构成）进预加载上下文，同时进溯源池排除名单；提示词加第 14 条，把「口径怎么定的 / 这个中文说法对应哪个 OSM 标签 / 某份数据有什么坑 / 某类别为什么查不到」指向 `search_knowledge`
