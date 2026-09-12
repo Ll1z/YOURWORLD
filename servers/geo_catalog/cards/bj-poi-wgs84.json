@@ -1,0 +1,61 @@
+{
+  "id": "bj-poi-wgs84",
+  "name": "北京 POI 点层与面层（WGS84）",
+  "description": "从 OSM 北京省级切片抽取的 POI，按方案 C 分点层与面层保存，保留原始几何与标签，计数口径由 servers/geo_knowledge/poi_scope.json 定义。",
+  "spatial": {
+    "bbox": [113.6638, 39.3270, 117.7519, 41.3677],
+    "note": "覆盖整份 OSM 提取范围；district 字段标注所属区，五区外为 null"
+  },
+  "temporal": {
+    "derived_at": "2026-09-12",
+    "upstream": "OSM 2026-09-11"
+  },
+  "crs": {"epsg": 4326, "name": "WGS84"},
+  "format": {
+    "files": ["data/processed/poi_point.gpkg", "data/processed/poi_area.gpkg"],
+    "layers": ["poi_point", "poi_area"],
+    "build_script": "scripts/build_poi.py"
+  },
+  "schema": {
+    "osm_type": "node / way / relation",
+    "osm_id": "OSM 要素 id，字符串类型",
+    "name": "名称，可为空",
+    "category_key": "主分类所属键，按 PRIORITY 顺序取第一个命中",
+    "category_value": "主分类取值，如 hospital / convenience",
+    "district": "所属区名，五区外为 null",
+    "other_tags": "原始 HSTORE 标签串，完整保留全部标签",
+    "geometry": "点层为 Point；面层为 Polygon / MultiPolygon",
+    "rep_x / rep_y": "仅面层：代表点经纬度（point_on_surface，保证落在多边形内）",
+    "area_m2": "仅面层：大地线面积，平方米"
+  },
+  "units": {
+    "coordinates": "十进制度 (WGS84)",
+    "area_m2": "平方米（大地线面积）",
+    "note": "距离在 UTM 50N 平面下计算；禁止直接对经纬度算距离"
+  },
+  "update_frequency": "随 OSM 上游更新重建",
+  "source": {
+    "url": "https://download.openstreetmap.fr/extracts/asia/china/beijing.osm.pbf",
+    "license": "ODbL 1.0",
+    "attribution": "© OpenStreetMap contributors"
+  },
+  "sample_rows": [
+    {"layer": "poi_point", "osm_id": "8985515592", "name": "白纸坊街道", "category_key": "amenity", "category_value": "townhall", "district": "西城区"}
+  ],
+  "counts": {
+    "poi_point": {"total": 25921, "in_5_districts": 16467},
+    "poi_area": {"total": 26657, "in_5_districts": 13085},
+    "note": "点层含 POI 标签的占 points 图层 16.3%；面层占 multipolygons 的 12.8%"
+  },
+  "known_pitfalls": [
+    "面层有 15 个几何无效要素（LinearRing 点数不足）已剔除，读取时须用 on_invalid=\"ignore\"，否则 pyogrio 直接抛 GEOSException。",
+    "osm_id 是字符串，跨表连接与去重必须按字符串处理。",
+    "面层代表点用 point_on_surface 而非质心：凹多边形（如 L 形院区）的质心会落在多边形外。",
+    "同一设施的多个标签只保留一个主分类，其余在 other_tags 中，做多标签统计时必须解析 other_tags。",
+    "点层 POI 的 amenity/shop/healthcare 等全部藏在 other_tags，仅 place/man_made/highway/barrier 是独立列。",
+    "点面并存导致的重复计数实测约 2.6%，采取「不去重」口径，理由见 servers/geo_knowledge/poi_scope.json。",
+    "只用点层会漏掉一半以上医院：东城区医院类仅点层 11 个，点面并集 34 个。",
+    "POI 名称缺失率不低，按名称聚合不可靠。",
+    "数据完整性取决于 OSM 志愿者，结论须表述为「OSM 数据显示」。"
+  ]
+}

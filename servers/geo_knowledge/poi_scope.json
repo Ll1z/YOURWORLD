@@ -1,0 +1,47 @@
+{
+  "id": "poi-presence-scope",
+  "name": "POI 存在性查询口径",
+  "version": "1.0",
+  "effective_from": "2026-09-12",
+  "applies_to": ["某点周围有什么", "某范围内有哪些 X", "某区有哪些 X"],
+  "question": "OSM 中同一类设施既有挂点(node)也有挂面(way/relation)，如何计数才不重不漏？",
+
+  "default_scope": {
+    "layers": ["poi_point", "poi_area"],
+    "combination": "并集",
+    "dedup": "不做几何去重，按 osm_id 唯一标识",
+    "area_geometry_for_distance": "point_on_surface（rep_x/rep_y），保证落在多边形内部",
+    "distance_metric": "直线距离，在 UTM 50N (EPSG:32650) 平面下计算",
+    "distance_semantics": "直线距离，非路网可达性距离。可达性分析属 Stage 2+"
+  },
+
+  "why_no_geometric_dedup": {
+    "evidence": "五区内医疗类 POI 共 441 个（点 224 + 面 231）。用 150 m 邻域做点面配对，仅 14 对（6.1%）匹配，且其中只有 6 对名称相符。",
+    "interpretation": "OSM 数据模型下同一实体只会是 node 或 way/relation 之一。邻域内的其余配对是真实存在的相邻独立设施（如院区内独立药房、门诊部），几何去重会错误合并它们。",
+    "residual_duplication": "约 2.6%（6/231）的面存在同名邻近点，属测绘时点面双挂，是已知的少量噪声。",
+    "cost_of_wrong_choice": "几何去重会把院内独立设施误合并，损失比双挂噪声更大，因此默认不去重。"
+  },
+
+  "why_must_merge_layers": {
+    "evidence": "东城区医院类（hospital/clinic/doctors）计数：仅点层 11、仅面层 23、并集 34。五区内医疗类：点层 224、面层 231。",
+    "interpretation": "只用点层会漏掉一半以上的医院；只用面层会漏掉独立药房等点状设施。两层必须合并。"
+  },
+
+  "category_matching": {
+    "primary": "category_key / category_value 为主分类，按 PRIORITY 顺序取第一个命中的键",
+    "priority_order": ["amenity", "healthcare", "shop", "tourism", "office", "leisure", "craft", "historic", "sport"],
+    "note": "非主分类的其它标签完整保留在 other_tags 中，自定义口径可绕过主分类直接用 other_tags 过滤",
+    "presets": {
+      "medical": ["hospital", "clinic", "doctors", "pharmacy"],
+      "hospital_only": ["hospital"],
+      "convenience": ["convenience", "supermarket"]
+    }
+  },
+
+  "known_limitations": [
+    "OSM 完备性取决于志愿者测绘，郊区与新增设施覆盖不全，结论应表述为「OSM 数据显示」而非「事实上」。",
+    "面层面积用大地线面积；用面积做筛选时注意与边界数据的来源差异。",
+    "五区外的 POI 保留在数据中（district 为 null），查询必须显式限定范围。",
+    "POI 名称缺失率不低，按名称去重或聚合都不可靠。"
+  ]
+}
