@@ -14,6 +14,7 @@ from typing import Any
 
 from openai import OpenAI
 
+from agent import telemetry
 from agent.config import Settings
 from agent.mcp_hub import GROUNDING_EXCLUDE, MCPHub
 
@@ -74,6 +75,8 @@ class AgentRun:
     invocations: list[Invocation] = field(default_factory=list)
     context: dict = field(default_factory=dict)
     usage: dict = field(default_factory=dict)
+    spans: list[dict] = field(default_factory=list)
+    span_warnings: list[str] = field(default_factory=list)
 
     def tool_results(self) -> list[dict]:
         return [i.result for i in self.invocations]
@@ -91,6 +94,8 @@ class AgentRun:
                 {**asdict(i), "result": _truncate(i.result)} for i in self.invocations
             ],
             "context_uris": sorted(self.context),
+            "spans": self.spans,
+            "span_warnings": self.span_warnings,
         }
 
 
@@ -146,6 +151,49 @@ async def run(
     max_steps: int = 6,
     on_event=None,
     clarification: str | None = None,
+    tracer: telemetry.Tracer | None = None,
+) -> AgentRun:
+    """一次提问的入口：起根 span → 跑循环 → 把 span 树挂回结果。
+
+    整段循环包在根 span 里，chat / execute_tool 才会挂在它下面，
+    trace 里能直接看出「哪次工具调用属于哪一轮、哪一轮开始跑偏」。
+    """
+    settings.apply_otel_env()
+    tracer = tracer or telemetry.Tracer()
+    with tracer.span(
+        "invoke_agent GeoAnalyst",
+        telemetry.INVOKE_AGENT,
+        **{
+            telemetry.AGENT_NAME: "GeoAnalyst",
+            telemetry.SYSTEM: "deepseek",
+            telemetry.REQUEST_MODEL: settings.deepseek_model,
+            telemetry.CONVERSATION_ID: tracer.run_id,
+            "geo.question": question,
+            "geo.clarification": clarification,
+        },
+    ) as span:
+        result = await _drive(question, hub, settings, max_steps, on_event, clarification, tracer)
+        span.set(**{
+            telemetry.INPUT_TOKENS: result.usage.get("prompt_tokens", 0),
+            telemetry.OUTPUT_TOKENS: result.usage.get("completion_tokens", 0),
+            telemetry.STOPPED: result.stopped,
+            "geo.steps": result.steps,
+            "geo.repair_rounds": result.repair_rounds,
+        })
+    tracer.flush()
+    result.spans = tracer.spans
+    result.span_warnings = tracer.warnings
+    return result
+
+
+async def _drive(
+    question: str,
+    hub: MCPHub,
+    settings: Settings,
+    max_steps: int,
+    on_event,
+    clarification: str | None,
+    tracer: telemetry.Tracer,
 ) -> AgentRun:
     client = OpenAI(
         api_key=settings.deepseek_api_key,
@@ -165,15 +213,33 @@ async def run(
 
     for step in range(1, max_steps + 1):
         steps = step
-        response = client.chat.completions.create(
-            model=settings.deepseek_model,
-            messages=messages,
-            tools=tools,
-            temperature=settings.temperature,
-        )
-        if response.usage:
-            for key in usage:
-                usage[key] += getattr(response.usage, key, 0) or 0
+        with tracer.span(
+            f"chat {settings.deepseek_model}",
+            telemetry.CHAT,
+            **{
+                telemetry.SYSTEM: "deepseek",
+                telemetry.REQUEST_MODEL: settings.deepseek_model,
+                telemetry.STEP: step,
+                "geo.message_count": len(messages),
+            },
+        ) as span:
+            response = client.chat.completions.create(
+                model=settings.deepseek_model,
+                messages=messages,
+                tools=tools,
+                temperature=settings.temperature,
+            )
+            if response.usage:
+                for key in usage:
+                    usage[key] += getattr(response.usage, key, 0) or 0
+                span.set(**{
+                    telemetry.INPUT_TOKENS: getattr(response.usage, "prompt_tokens", 0) or 0,
+                    telemetry.OUTPUT_TOKENS: getattr(response.usage, "completion_tokens", 0) or 0,
+                })
+            span.set(**{
+                telemetry.RESPONSE_MODEL: response.model,
+                "geo.tool_calls": len(response.choices[0].message.tool_calls or []),
+            })
 
         message = response.choices[0].message
         if not message.tool_calls:
@@ -192,7 +258,21 @@ async def run(
             except json.JSONDecodeError:
                 arguments = {}
             started = time.perf_counter()
-            payload, ok, error = await hub.call(call.function.name, arguments)
+            with tracer.span(
+                f"execute_tool {call.function.name}",
+                telemetry.EXECUTE_TOOL,
+                **{
+                    telemetry.TOOL_NAME: call.function.name,
+                    telemetry.TOOL_CALL_ID: call.id,
+                    telemetry.TOOL_SERVER: hub.server_of.get(call.function.name, "?"),
+                    telemetry.STEP: step,
+                    "geo.tool.arguments": json.dumps(arguments, ensure_ascii=False),
+                },
+            ) as span:
+                payload, ok, error = await hub.call(call.function.name, arguments)
+                span.set(**{telemetry.TOOL_OK: ok, "geo.tool.error": error})
+                if not ok:
+                    span.fail(RuntimeError(str(error or "工具返回失败")))
             invocation = Invocation(
                 step=step,
                 server=hub.server_of.get(call.function.name, "?"),
@@ -215,7 +295,7 @@ async def run(
     repair_rounds = 0
     if stopped == "final" and answer:
         pool = grounding_pool(question, clarification, context, invocations)
-        answer, repair_rounds = _repair_ungrounded(client, settings, messages, answer, pool)
+        answer, repair_rounds = _repair_ungrounded(client, settings, messages, answer, pool, tracer)
 
     return AgentRun(question=question, answer=answer, stopped=stopped, steps=steps,
                     repair_rounds=repair_rounds, clarification=clarification,
@@ -229,6 +309,7 @@ def _repair_ungrounded(
     messages: list[dict],
     answer: str,
     pool: list,
+    tracer: telemetry.Tracer,
     max_rounds: int = 2,
 ) -> tuple[str, int]:
     """自检反馈：回答里出现无法溯源的数字时，把它打回去重写。
@@ -254,12 +335,27 @@ def _repair_ungrounded(
                 "就明确写「该数值需要额外计算，本次未计算」，不要自行估算或换算。"
             ),
         })
-        response = client.chat.completions.create(
-            model=settings.deepseek_model,
-            messages=messages,
-            temperature=settings.temperature,
-        )
-        answer = response.choices[0].message.content or answer
+        with tracer.span(
+            f"chat {settings.deepseek_model}",
+            telemetry.CHAT,
+            **{
+                telemetry.SYSTEM: "deepseek",
+                telemetry.REQUEST_MODEL: settings.deepseek_model,
+                telemetry.REPAIR_ROUND: round_no,
+                "geo.offenders": len(check.offenders),
+            },
+        ) as span:
+            response = client.chat.completions.create(
+                model=settings.deepseek_model,
+                messages=messages,
+                temperature=settings.temperature,
+            )
+            answer = response.choices[0].message.content or answer
+            if response.usage:
+                span.set(**{
+                    telemetry.INPUT_TOKENS: getattr(response.usage, "prompt_tokens", 0) or 0,
+                    telemetry.OUTPUT_TOKENS: getattr(response.usage, "completion_tokens", 0) or 0,
+                })
     return answer, max_rounds
 
 

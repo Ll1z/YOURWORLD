@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agent import selfcheck
+from agent import selfcheck, telemetry
 from agent.loop import AgentRun, build_visual_hints, grounding_pool
 
 DEFAULT_OUTDIR = os.path.join("data", "processed", "results")
@@ -89,12 +89,30 @@ def render(run_result: AgentRun, checks: list[selfcheck.Check], run_dir: str, ts
     if not run_result.invocations:
         lines.append("| - | - | - | - | 本次未调用任何工具 | - |")
     lines.append("")
+    lines.append("## 观测")
+    lines.append("")
+    obs = telemetry.summarize(run_result.spans)
+    lines.append(f"- span 总数：{obs['span_total']}"
+                 f"（invoke_agent {obs['invoke_agent']['count']} / chat {obs['chat']['count']}"
+                 f" / execute_tool {obs['execute_tool']['count']}）")
+    lines.append(f"- 模型调用耗时合计：{obs['chat']['duration_ms']} ms；"
+                 f"工具调用耗时合计：{obs['execute_tool']['duration_ms']} ms")
+    lines.append(f"- 失败 span：{obs['errors']}")
+    if obs["otlp"]:
+        lines.append("- OTLP 出口：已启用（span 同时推到 OTEL_EXPORTER_OTLP_ENDPOINT）")
+    else:
+        lines.append("- OTLP 出口：未配置（设 OTEL_EXPORTER_OTLP_ENDPOINT 后 span 会推到 Langfuse 等后端）")
+    for warning in run_result.span_warnings:
+        lines.append(f"- 观测告警：{warning}")
+    lines.append("")
     lines.append("## 产物")
     lines.append("")
     lines.append(f"- `{os.path.join(run_dir, 'report.md')}`：本报告")
     lines.append(f"- `{os.path.join(run_dir, 'trace.json')}`：完整轨迹（含每次工具调用的参数与结果摘要）")
     lines.append(f"- `{os.path.join(run_dir, 'visual_hints.json')}`：Cesium 前端字段"
                  "（camera 飞向查询点 + markers 标记附近内容）")
+    lines.append(f"- `{os.path.join(run_dir, 'spans.jsonl')}`：span 树"
+                 "（GenAI 语义约定，含父子关系与起止时间）")
     lines.append("")
     lines.append("## 硬性规则声明")
     lines.append("")
@@ -122,8 +140,16 @@ def persist(run_result: AgentRun, outdir: str = DEFAULT_OUTDIR) -> Artifacts:
         json.dump(run_result.to_dict(), f, ensure_ascii=False, indent=1, default=str)
     with open(os.path.join(run_dir, "visual_hints.json"), "w", encoding="utf-8") as f:
         json.dump(hints, f, ensure_ascii=False, indent=1, default=str)
+    write_spans(run_result.spans, run_dir)
 
     return Artifacts(run_dir=run_dir, report_text=report_text, checks=checks, visual_hints=hints)
+
+
+def write_spans(spans: list[dict], run_dir: str) -> None:
+    """按 OTel span 的常见形状写 JSONL：一行一个 span，便于直接喂给任何 trace 查看器。"""
+    with open(os.path.join(run_dir, "spans.jsonl"), "w", encoding="utf-8") as f:
+        for span in spans:
+            f.write(json.dumps(span, ensure_ascii=False, default=str) + "\n")
 
 
 def load_visual_hints(run_id: str, outdir: str = DEFAULT_OUTDIR) -> dict:

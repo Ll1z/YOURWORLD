@@ -19,14 +19,14 @@
 
 ## 技术栈
 
-- Python 3.12，用 `uv` 管理解释器与虚拟环境
+- Python 3.12，用 `uv` 管理解释器与虚拟环境。本机直连 pypi.org 会被 TLS 干扰（握手 EOF），`pyproject.toml` 里把清华镜像设为默认 index，否则依赖装不上；lock 里的包地址随之指向镜像
 - 空间计算：DuckDB（spatial / FTS / vss 扩展）、GeoPandas、Shapely 2、pyogrio
 - MCP：官方 Python SDK `mcp` 2.x（`from mcp.server.mcpserver import MCPServer`；FastMCP 在 2.x 已更名为 MCPServer，`mcp.server.fastmcp` 路径会直接报错），先 stdio，稳定后 Streamable HTTP
 - MCP 客户端（实测坑）：用 `mcp.client.stdio.stdio_client` + `ClientSession`，**进入上下文后必须显式 `await session.initialize()`**，否则服务端对后续请求一律返回 `Invalid request parameters`；返回模型字段全是 snake_case（`server_info` / `protocol_version` / `resource_templates` / `structured_content`）。冒烟测试见 `scripts/mcp_smoke_test.py`
 - 检索：单文件索引 `data/processed/knowledge.duckdb`（由 `scripts/build_knowledge_index.py` 构建），DuckDB FTS(BM25) + VSS(HNSW, cosine) 双路召回后按 RRF(k=60) 融合。中文没有可用分词器，自己按字符 bigram 切（Lucene CJKBigramFilter 的做法），ASCII 按词切；embedding 用 fastembed + `BAAI/bge-small-zh-v1.5`（512 维，ONNX CPU，不需要 torch），权重缓存在 `data/models/fastembed/`，HuggingFace 端点走 hf-mirror。dense 侧必须双阈值（`MIN_SIM` / `SIM_MARGIN`）：bge 对无关文本的相似度基线偏高（实测完全无关的问句也有 0.46），不设阈值会让无关语料块塞满 top-k 并稀释 RRF
 - 沙箱：L1 受限子进程（`geo_compute/sandbox.py`）。Windows 侧用 Job Object 压内存与进程数，子进程内装导入黑名单 + socket 守卫 + 路径围栏，执行前先过 AST 静态检查；后端可替换，换 L2 Docker 只动这一个类
 - 模型：DeepSeek API（OpenAI 兼容接口），密钥只放 `.env`
-- 观测：OpenTelemetry GenAI 语义约定 + Langfuse（Stage 2 起接入）
+- 观测：`agent/telemetry.py` 把一次运行落成一棵 OTel span 树——invoke_agent 根 span 下挂 chat（每次模型调用）与 execute_tool（每次工具调用）子 span，属性名走 GenAI 语义约定（`gen_ai.*`），项目自己的属性统一 `geo.` 前缀。出口两个：本地 `spans.jsonl`（每次运行必写，离线可查）与 OTLP/HTTP（设了 `OTEL_EXPORTER_OTLP_ENDPOINT` 才启用，Langfuse v3 走这个口）。`.env` 里的观测配置由 `Settings.apply_otel_env()` 倒进环境变量：pydantic-settings 读 `.env` 只填字段、不写 `os.environ`，而 OTLP exporter 只认环境变量
 
 ## 数据来源
 
@@ -48,6 +48,7 @@
 - Agent 生成的代码一律在 `sandbox/run_<id>/` 内以受限子进程执行：禁网、超时（默认 30 秒）、内存上限（默认 1024 MB）、数据只读、只许写运行目录。`run_python` 是它的对外入口，也是唯一入口——不要在别处起子进程跑 Agent 写的代码
 - 能用现成工具回答的，不许用 `run_python` 绕过去：工具的口径全项目唯一，脚本里的口径是临时的
 - 敏感信息只放 `.env`，禁止写入代码或提交进版本库
+- 观测不得成为跑通的前提：SDK 缺失或出口配错只记一条告警，不中断问答
 
 ## 目录约定
 

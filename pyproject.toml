@@ -11,6 +11,8 @@ dependencies = [
     "matplotlib>=3.11.2",
     "mcp>=2.2.0",
     "openai>=3.13.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
     "pydantic-settings>=2.15.0",
     "pyogrio>=0.13.0",
     "pyproj>=3.8.0",
@@ -24,6 +26,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["servers/geo_catalog", "servers/geo_compute", "servers/geo_knowledge", "agent"]
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
 
 [tool.uv]
 link-mode = "copy"

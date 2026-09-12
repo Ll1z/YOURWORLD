@@ -224,6 +224,14 @@
 
 溯源一开始把预加载的类别目录也当成可信来源，于是「4 家咖啡馆」这种凭空计数被目录里某个类别的 4 兜住——140 个与本次提问无关的数字，让小整数几乎必然「有出处」。现在目录型清单（类别目录、数据集清单、知识库索引规模）一律不进溯源池，单位换算的容差也按数值量级给（4326 ÷ 1000 不该把 4 判成有出处）。收紧之后重跑同一道题，模型放弃了自己数，改用 `run_python` 分档——规则和围栏是一起起作用的。
 
+### ④-1 观测层落地
+
+- 一次运行 = 一棵 OTel span 树：`invoke_agent` 根 span 下挂 `chat` 与 `execute_tool` 子 span，属性名走 GenAI 语义约定（`gen_ai.*`），项目自己的属性统一 `geo.` 前缀
+- 出口两个：本地 `spans.jsonl`（每次运行必写，随报告一起落盘）与 OTLP/HTTP（设 `OTEL_EXPORTER_OTLP_ENDPOINT` 才启用；Langfuse v3 的入口是 `https://cloud.langfuse.com/api/public/otel` + Basic Auth 头）
+- `.env` 里的观测配置由 `Settings.apply_otel_env()` 倒进 `os.environ`：pydantic-settings 读 `.env` 只填字段、不写环境变量，而 OTLP exporter 只认环境变量——少这一步，写在 `.env` 里的出口等于没配
+- 观测不是跑通的前提：没装 SDK 或出口配错只记一条告警，报告里单列「观测」段
+- 顺带发现：`gen_ai.response.model` 显示 DeepSeek 把 `deepseek-chat` 路由到了 `deepseek-flash`——这种「请求模型 ≠ 实际模型」以前是看不见的
+
 ### ③ 混合检索落地（知识库问答的数据侧）
 
 - 语料切块（141 块）：数据卡按「整卡 + schema + 每条已知坑」切，口径文件按顶层小节切，`aliases.json` 的 80 条中文别名与 5 条「查不到」说明各算一块
