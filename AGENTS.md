@@ -78,6 +78,8 @@ servers/ 下的包以可编辑模式安装（hatchling），全项目可直接�
 
 Agent 循环跑在 `web/server.py` 里的独立后台事件循环中：MCP stdio 会话绑定在创建它的 loop 上，且 OpenAI SDK 同步阻塞，直接跑在 web 的 loop 上会让一次提问把静态页面一起卡住。天地图 Key 只在渲染 `index.html` 时注入，不落盘、不入库。
 
+中心点的选择权留在界面上：`GET /api/places` 不经过 LLM 直接检索地名候选，候选同时画到地图与列表，两处都可点选。点选结果作为一条 clarification 随问题一起送给 Agent，并写进 `report.md` 与 `trace.json`——事后的报告里能看出「当时在几个同名地点里选了哪一个」。数值溯源把用户输入与 Resource 上下文、工具返回并列为可信来源，否则用户自己给的坐标会被判成幻觉。
+
 查询口径只有一处实现：`servers/geo_compute/query.py`。MCP Tool `query_nearby` 与 `scripts/ask_nearby.py` 都调用它，禁止在别处重写 SQL。
 
 空间自检器（`agent/selfcheck.py`）做五项检查：CRS、单位、几何有效性、量级自洽，以及**数值溯源**——最终回答里的每个数字都必须能在工具返回中找到出处。调用 `distance_between` 时额外做一次距离互证：UTM 平面距离与椭球面大地线距离必须互相印证（容差按舍入误差推导）。溯源不通过时循环会把回答打回重写（最多 2 轮）。实测模型确实会在叙述里自行估算两个设施之间的距离，只在提示词里禁止是不够的。

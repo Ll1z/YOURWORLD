@@ -20,7 +20,7 @@ from agent.mcp_hub import MCPHub
 SYSTEM_PROMPT = """你是 GeoAnalyst，一个地理空间分析 Agent。当前数据只覆盖北京五区：东城区、西城区、朝阳区、丰台区、海淀区。
 
 硬性规则，任何情况下都不得违背：
-1. 所有数值（数量、距离、面积、排名）只能来自工具返回。禁止自己计算、估算或凭常识填写。
+1. 所有数值（数量、距离、面积、排名）只能来自工具返回。禁止自己计算、估算或凭常识填写。表格与列表不要加序号列或编号，序号也是一种凭空生成的数字。
 2. 先给结论，再给依据，依据至少包含：数据来源、CRS、口径、方法与局限。
 3. 半径查询必须先有一个明确、可命名的中心，和路径规划要先选起点是一个道理。顺序是：用户在问题里给了地点就先用 find_places 把它解析成坐标；只给了区名加半径就先追问以哪里为中心。禁止用行政区的几何代表点当圆心。
 4. 涉及「有哪些 / 有多少」时，必须同时考虑点层与面层——只用点层会漏掉一半以上的医院。
@@ -31,6 +31,11 @@ SYSTEM_PROMPT = """你是 GeoAnalyst，一个地理空间分析 Agent。当前�
 9. 现有工具答不了的问题，直接说明缺什么数据或工具，不要编造。
 
 请用中文回答。"""
+
+# 用户在界面上点名了中心点（或端点）时，把这句话追加到提问后面。
+# 不绕过 Agent 直接查库：中心点的选择要留在轨迹里，才能解释「为什么是这几个结果」。
+CLARIFICATION_TEMPLATE = ("[用户在界面上确认了{note}。直接用它，"
+                          "不要再解析地名、也不要换成别的点。]")
 
 
 def _context_block(context: dict) -> str:
@@ -59,6 +64,7 @@ class AgentRun:
     stopped: str
     steps: int
     repair_rounds: int = 0
+    clarification: str | None = None
     invocations: list[Invocation] = field(default_factory=list)
     context: dict = field(default_factory=dict)
     usage: dict = field(default_factory=dict)
@@ -73,6 +79,7 @@ class AgentRun:
             "stopped": self.stopped,
             "steps": self.steps,
             "repair_rounds": self.repair_rounds,
+            "clarification": self.clarification,
             "usage": self.usage,
             "invocations": [
                 {**asdict(i), "result": _truncate(i.result)} for i in self.invocations
@@ -89,12 +96,24 @@ def _truncate(payload: Any, limit: int = 4000) -> Any:
     return {"_truncated": True, "_original_chars": len(text), "head": text[:limit]}
 
 
+def grounding_pool(question: str, clarification: str | None, context: dict,
+                   invocations: list["Invocation"]) -> list:
+    """数值溯源的可信来源：预加载上下文 + 用户输入 + 全部工具返回。
+
+    用户在界面上点选的中心点与原始提问同属输入，模型引用它不算凭空造数；
+    漏了它就会把「用户自己给的坐标」判成幻觉。
+    """
+    return [context, {"question": question}, {"clarification": clarification},
+            *[i.result for i in invocations]]
+
+
 async def run(
     question: str,
     hub: MCPHub,
     settings: Settings,
     max_steps: int = 6,
     on_event=None,
+    clarification: str | None = None,
 ) -> AgentRun:
     client = OpenAI(
         api_key=settings.deepseek_api_key,
@@ -104,7 +123,8 @@ async def run(
     context = await hub.context()
     messages: list[dict] = [
         {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + _context_block(context)},
-        {"role": "user", "content": question},
+        {"role": "user", "content": question + (f"\n\n{CLARIFICATION_TEMPLATE.format(note=clarification)}"
+                                                if clarification else "")},
     ]
     tools = hub.openai_tools()
     invocations: list[Invocation] = []
@@ -163,11 +183,12 @@ async def run(
 
     repair_rounds = 0
     if stopped == "final" and answer:
-        pool = [context, {"question": question}, *[i.result for i in invocations]]
+        pool = grounding_pool(question, clarification, context, invocations)
         answer, repair_rounds = _repair_ungrounded(client, settings, messages, answer, pool)
 
     return AgentRun(question=question, answer=answer, stopped=stopped, steps=steps,
-                    repair_rounds=repair_rounds, invocations=invocations,
+                    repair_rounds=repair_rounds, clarification=clarification,
+                    invocations=invocations,
                     context=context, usage=usage)
 
 
@@ -194,8 +215,11 @@ def _repair_ungrounded(
         messages.append({
             "role": "user",
             "content": (
-                f"上一版回答未通过数值溯源自检：{check.detail}\n"
-                "请重写回答，只使用工具返回中出现过的数字。若确实需要一个工具没有返回的数字，"
+                f"上一版回答未通过数值溯源自检：有 {len(check.offenders)} 个数字在工具返回中找不到出处。\n"
+                "请重写回答，只使用工具返回中出现过的数字；那几个数字直接删掉，"
+                "不要在回答里复述、罗列或解释它们本身——列出来一样算没通过。"
+                "常见的漏网之鱼是表格序号列与列表编号：它们不是数据，直接去掉编号即可。"
+                "若确实需要一个工具没有返回的数字，"
                 "就明确写「该数值需要额外计算，本次未计算」，不要自行估算或换算。"
             ),
         })
@@ -208,7 +232,7 @@ def _repair_ungrounded(
     return answer, max_rounds
 
 
-HINT_VERSION = 2
+HINT_VERSION = 3
 
 
 def build_visual_hints(run_result: AgentRun) -> dict:
@@ -221,12 +245,17 @@ def build_visual_hints(run_result: AgentRun) -> dict:
     def last_ok(tool: str):
         return next((i for i in reversed(run_result.invocations) if i.ok and i.name == tool), None)
 
+    # 地名候选单独列出来：前端把它渲染成可点的中心点确认列表
+    places = last_ok("find_places")
+    found = candidate_list(places.result) if places is not None else []
+
     hints = {
         "version": HINT_VERSION,
         "question": run_result.question,
         "kind": "none",
         "camera": None,
         "markers": [],
+        "candidates": found,
         "path": None,
         "radius_m": None,
         "note": "本次运行没有产生可定位的空间结果",
@@ -293,10 +322,8 @@ def build_visual_hints(run_result: AgentRun) -> dict:
         })
         return hints
 
-    places = last_ok("find_places")
-    records = _records(places.result) if places is not None else []
-    if records:
-        top = records[0]
+    if found:
+        top = found[0]
         hints.update({
             "kind": "places",
             "camera": {
@@ -308,16 +335,17 @@ def build_visual_hints(run_result: AgentRun) -> dict:
             },
             "markers": [
                 {
-                    "id": r["ref"],
-                    "lon": r["lon"],
-                    "lat": r["lat"],
-                    "label": r.get("name") or "(无名)",
-                    "kind": r["layer"],
-                    "ref": r["ref"],
-                    "category": r.get("category_value"),
-                    "district": r.get("district"),
+                    "id": c["ref"],
+                    "lon": c["lon"],
+                    "lat": c["lat"],
+                    "label": c["label"],
+                    "kind": c["layer"],
+                    "ref": c["ref"],
+                    "category": c["category"],
+                    "district": c["district"],
+                    "match_score": c["match_score"],
                 }
-                for r in records
+                for c in found
             ],
             "note": "camera 飞向匹配度最高的候选，markers 列出全部候选，供人工确认中心点。",
         })
@@ -342,6 +370,26 @@ def _records(payload: Any) -> list[dict]:
             if isinstance(value, list):
                 return [r for r in value if isinstance(r, dict)]
     return []
+
+
+def candidate_list(payload: Any) -> list[dict]:
+    """地名候选：前端把它渲染成可点的中心点确认列表。
+
+    候选随每次运行一起落盘，所以事后回看也能知道当时在几个同名地点里选了哪一个。
+    """
+    return [
+        {
+            "ref": r["ref"],
+            "label": r.get("name") or "(无名)",
+            "layer": r["layer"],
+            "category": r.get("category_value"),
+            "district": r.get("district"),
+            "lon": r["lon"],
+            "lat": r["lat"],
+            "match_score": r.get("match_score"),
+        }
+        for r in _records(payload)
+    ]
 
 
 def _endpoint_marker(tag: str, endpoint: dict) -> dict:

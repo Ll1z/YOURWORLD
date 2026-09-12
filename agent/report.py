@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent import selfcheck
-from agent.loop import AgentRun, build_visual_hints
+from agent.loop import AgentRun, build_visual_hints, grounding_pool
 
 DEFAULT_OUTDIR = os.path.join("data", "processed", "results")
 
@@ -48,7 +48,8 @@ def checks_for(run_result: AgentRun) -> list[selfcheck.Check]:
     if distance is not None:
         checks.append(selfcheck.check_distance(distance.result))
 
-    pool = [run_result.context, {"question": run_result.question}, *run_result.tool_results()]
+    pool = grounding_pool(run_result.question, run_result.clarification,
+                          run_result.context, run_result.invocations)
     checks.append(selfcheck.check_grounding(run_result.answer, pool))
     return checks
 
@@ -59,6 +60,8 @@ def render(run_result: AgentRun, checks: list[selfcheck.Check], run_dir: str, ts
     lines.append("")
     lines.append(f"- 生成时间（UTC）：{ts}")
     lines.append(f"- 问题：{run_result.question}")
+    if run_result.clarification:
+        lines.append(f"- 用户在界面上确认：{run_result.clarification}")
     lines.append(f"- 循环：# {run_result.steps} 步，结束方式 {run_result.stopped}"
                  f"（final = 模型给出最终回答，max_steps = 触顶）")
     lines.append(f"- 数值溯源修复轮次：{run_result.repair_rounds}"

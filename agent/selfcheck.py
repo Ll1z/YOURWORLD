@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import duckdb
@@ -33,6 +33,7 @@ class Check:
     name: str
     passed: bool
     detail: str
+    offenders: list[str] = field(default_factory=list)
 
 
 def _in_china(lon: float, lat: float) -> bool:
@@ -268,6 +269,7 @@ def check_grounding(answer: str, tool_results) -> Check:
         return Check(
             "grounding", False,
             f"{len(ungrounded)} 个数字无法在工具返回中溯源，疑似模型自行生成：{ungrounded[:8]}",
+            ungrounded,
         )
     return Check("grounding", True, "回答中的全部数字都能在工具返回中找到出处")
 

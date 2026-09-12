@@ -34,7 +34,7 @@ from pydantic import BaseModel, Field
 
 from agent import report
 from agent.config import Settings
-from agent.loop import AgentRun, run
+from agent.loop import AgentRun, candidate_list, run
 from agent.mcp_hub import MCPHub
 
 INDEX_HTML = Path(__file__).resolve().parent / "index.html"
@@ -108,14 +108,35 @@ class AgentWorker:
             self._thread.join(timeout=10)
 
 
+class CenterChoice(BaseModel):
+    """用户在界面上确认的中心点：来自 find_places 的候选，或地图上点选的位置。"""
+
+    lon: float = Field(ge=-180, le=180)
+    lat: float = Field(ge=-90, le=90)
+    label: str | None = Field(default=None, max_length=200)
+    ref: str | None = Field(default=None, max_length=120)
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     max_steps: int = Field(default=6, ge=1, le=12)
+    center: CenterChoice | None = None
 
 
-def _ask_job(question: str, max_steps: int) -> Callable[[MCPHub], Any]:
+def _center_note(center: CenterChoice | None) -> str | None:
+    """把用户点选的候选写成给模型看的一句话。回喂的是显式选择，不是模型的猜测。"""
+    if center is None:
+        return None
+    who = center.label or "用户指定点"
+    named = f"{who}（ref={center.ref}）" if center.ref else who
+    return f"中心点为 {named}，坐标 {center.lon}, {center.lat}（WGS84）"
+
+
+def _ask_job(question: str, max_steps: int,
+             center: CenterChoice | None = None) -> Callable[[MCPHub], Any]:
     async def job(hub: MCPHub) -> tuple[AgentRun, report.Artifacts]:
-        run_result = await run(question, hub, settings, max_steps=max_steps)
+        run_result = await run(question, hub, settings, max_steps=max_steps,
+                               clarification=_center_note(center))
         return run_result, await asyncio.to_thread(report.persist, run_result)
 
     return job
@@ -131,6 +152,7 @@ def _payload(run_result: AgentRun, artifacts: report.Artifacts) -> dict:
         "run_id": Path(artifacts.run_dir).name,
         "run_dir": artifacts.run_dir,
         "question": run_result.question,
+        "clarification": run_result.clarification,
         "answer": run_result.answer,
         "passed": artifacts.passed,
         "steps": run_result.steps,
@@ -226,7 +248,7 @@ async def ask(req: AskRequest) -> dict:
     if worker is None:
         raise HTTPException(503, f"Agent 未就绪：{getattr(app.state, 'worker_error', '未知原因')}")
     try:
-        future = worker.submit(_ask_job(req.question, req.max_steps))
+        future = worker.submit(_ask_job(req.question, req.max_steps, req.center))
     except RuntimeError as e:
         raise HTTPException(503, str(e))
     try:
@@ -241,6 +263,32 @@ async def runs() -> list[dict]:
     return await asyncio.to_thread(report.list_runs)
 
 
+@app.get("/api/places")
+async def places(name: str, district: str | None = None, limit: int = 8) -> dict:
+    """直接检索地名候选，不经过 LLM。
+
+    给「Agent 拒绝替你猜中心点」这种情况兜底：用户自己查一个地名，再点选重问。
+    """
+    worker: AgentWorker | None = app.state.worker
+    if worker is None:
+        raise HTTPException(503, f"Agent 未就绪：{getattr(app.state, 'worker_error', '未知原因')}")
+    args: dict[str, Any] = {"name": name, "limit": max(1, min(limit, 20))}
+    if district:
+        args["district"] = district
+
+    async def job(hub: MCPHub) -> tuple[list[dict], str | None]:
+        payload, ok, error = await hub.call("find_places", args)
+        return (candidate_list(payload), None) if ok else ([], error)
+
+    try:
+        found, error = await asyncio.wrap_future(worker.submit(job))
+    except Exception as e:  # noqa: BLE001 - 失败要以 JSON 回给前端
+        raise HTTPException(500, f"{type(e).__name__}: {e}")
+    if error:
+        raise HTTPException(400, error)
+    return {"candidates": found}
+
+
 @app.get("/api/runs/{run_id}")
 async def get_run(run_id: str) -> dict:
     _require_run_id(run_id)
@@ -250,7 +298,19 @@ async def get_run(run_id: str) -> dict:
         raise HTTPException(404, f"找不到运行记录 {run_id}")
     report_path = Path(report.DEFAULT_OUTDIR) / run_id / "report.md"
     text = report_path.read_text(encoding="utf-8") if report_path.exists() else ""
-    return {"run_id": run_id, "visual_hints": hints, "report": text}
+    return {"run_id": run_id, "question": _run_question(run_id),
+            "visual_hints": hints, "report": text}
+
+
+def _run_question(run_id: str) -> str:
+    """从 trace.json 取回原始问题，供前端在回放后用候选换中心重问。"""
+    path = Path(report.DEFAULT_OUTDIR) / run_id / "trace.json"
+    if not path.exists():
+        return ""
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("question", "")
+    except (json.JSONDecodeError, OSError):
+        return ""
 
 
 @app.get("/api/runs/{run_id}/report.md", response_class=PlainTextResponse)

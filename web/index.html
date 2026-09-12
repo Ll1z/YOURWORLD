@@ -75,6 +75,21 @@
     background: rgba(11,18,32,.94); border: 1px solid var(--accent); border-radius: 8px;
     max-width: 260px; line-height: 1.5; z-index: 9; }
   #hover .meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  #pick { position: absolute; z-index: 10; padding: 9px 11px; font-size: 12px;
+    background: rgba(11,18,32,.96); border: 1px solid var(--accent); border-radius: 8px;
+    max-width: 250px; line-height: 1.5; }
+  #pick .meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  #pick button { width: 100%; margin-top: 8px; padding: 6px 10px; font-size: 12px; }
+  .cands { display: flex; flex-direction: column; gap: 5px; }
+  .cand { text-align: left; padding: 7px 9px; font-size: 12px; line-height: 1.45;
+    border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); }
+  .cand:hover:not(:disabled) { border-color: var(--accent); }
+  .cand.active { border-color: var(--accent); background: #17324a; }
+  .cand .meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  input[type=text] { flex: 1; min-width: 0; padding: 7px 9px; font: inherit; font-size: 12px;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
   #banner { margin: 10px 16px 0; padding: 8px 10px; border-radius: 8px; font-size: 12px;
     background: #3a1d24; border: 1px solid #7f2b3a; color: #ffc9d2; display: none; }
 </style>
@@ -82,6 +97,7 @@
 <body>
 <div id="globe"></div>
 <div id="hover" hidden></div>
+<div id="pick" hidden></div>
 
 <aside id="panel">
   <header>
@@ -106,6 +122,18 @@
     <section>
       <h2>结论</h2>
       <div id="answer"></div>
+    </section>
+
+    <section id="center-section">
+      <h2>中心点候选</h2>
+      <div class="row">
+        <input id="place-q" type="text" placeholder="查地名，如 五道口 / 中关村地铁站">
+        <button id="place-find">查地名</button>
+      </div>
+      <div id="candidates" class="cands"></div>
+      <div class="row" style="color:var(--muted);font-size:11px">
+        点候选即以它为中心重问；也可以直接在地图上点候选标记。
+      </div>
     </section>
 
     <section>
@@ -211,6 +239,11 @@ const pinIndex = new Map();
 const hoverBox = document.getElementById('hover');
 const hintNote = document.getElementById('hint-note');
 let lastHints = null;
+let lastQuestion = '';
+let activeCenterRef = null;
+let candidateRefs = new Set();
+let lastCandidates = [];
+let pendingCenter = null;
 let showLabels = true;
 
 function flyTo(cam) {
@@ -235,8 +268,10 @@ function flyToHints(h) {
     ? Cesium.BoundingSphere.fromPoints(
         markers.map((m) => Cesium.Cartesian3.fromDegrees(m.lon, m.lat)))
     : null;
-  if (sphere && (sphere.radius > 1 || h.radius_m)) {
-    sphere.radius = Math.max(sphere.radius * 1.35, (h.radius_m || 0) * 1.2, 150);
+  if (sphere) {
+    // 只有一个标记时包围球半径为 0，必须给个下限，
+    // 否则会退回「相机放在目标正上方」那种把目标推到视野边缘的取景
+    sphere.radius = Math.max(sphere.radius * 1.35, (h.radius_m || 0) * 1.2, 200);
     viewer.camera.flyToBoundingSphere(sphere, {
       offset: new Cesium.HeadingPitchRange(
         Cesium.Math.toRadians((cam && cam.heading_deg) || 0),
@@ -253,29 +288,38 @@ function clearScene() {
   viewer.entities.removeAll();
   pinIndex.clear();
   hoverBox.hidden = true;
+  pickBox.hidden = true;
 }
+
+// 点按语义分档，标签加底色：底图切到影像后，白字细边基本认不出来
+const MARKER_SIZE = { center: 22, endpoint: 18, anchor: 16, poi_area: 14, poi_point: 13 };
 
 function addMarker(m) {
   const color = Cesium.Color.fromCssColorString(COLOR[m.kind] || COLOR.other);
   const isCenter = m.kind === 'center';
+  const size = MARKER_SIZE[m.kind] || 13;
   viewer.entities.add({
     id: m.id,
     position: Cesium.Cartesian3.fromDegrees(m.lon, m.lat),
     point: {
-      pixelSize: isCenter ? 15 : 10, color,
-      outlineColor: Cesium.Color.WHITE.withAlpha(0.9), outlineWidth: 1.5,
+      pixelSize: size, color,
+      outlineColor: Cesium.Color.WHITE, outlineWidth: isCenter ? 3 : 2,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      scaleByDistance: new Cesium.NearFarScalar(800, 1.1, 80000, 0.7),
     },
     label: {
       text: (isCenter ? '◎ ' : '') + (m.label || '(无名)'),
-      font: '500 13px "Microsoft YaHei", sans-serif',
+      font: 'bold 15px "Microsoft YaHei", sans-serif',
       fillColor: Cesium.Color.WHITE,
       outlineColor: Cesium.Color.fromCssColorString('#0b1220'),
-      outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-      pixelOffset: new Cesium.Cartesian2(0, -18),
+      outlineWidth: 4, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      showBackground: true,
+      backgroundColor: Cesium.Color.fromCssColorString('#0b1220').withAlpha(0.72),
+      backgroundPadding: new Cesium.Cartesian2(7, 4),
+      pixelOffset: new Cesium.Cartesian2(0, -(size / 2 + 12)),
       show: showLabels,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      scaleByDistance: new Cesium.NearFarScalar(500, 1.0, 40000, 0.0),
+      scaleByDistance: new Cesium.NearFarScalar(1500, 1.0, 120000, 0.7),
     },
   });
   pinIndex.set(m.id, m);
@@ -285,6 +329,7 @@ function applyHints(h) {
   clearScene();
   lastHints = h;
   if (!h) { hintNote.textContent = ''; return; }
+  candidateRefs = new Set((h.candidates || []).map((c) => c.ref));
 
   (h.markers || []).forEach(addMarker);
 
@@ -312,6 +357,10 @@ function applyHints(h) {
 
   flyToHints(h);
   hintNote.textContent = h.note || '';
+  // 用户确认过中心点后，Agent 不会再调 find_places，候选列表要留着才能换一个再试
+  if (h.candidates && h.candidates.length) lastCandidates = h.candidates;
+  const used = (h.kind === 'nearby' || h.kind === 'places') ? h.camera : null;
+  renderCandidates(lastCandidates, activeCenterRef, used && used.lon, used && used.lat);
 }
 
 function showHover(m, position) {
@@ -338,9 +387,42 @@ function showHover(m, position) {
 
 viewer.screenSpaceEventHandler.setInputAction((movement) => {
   const picked = viewer.scene.pick(movement.endPosition);
-  const m = picked && picked.id ? pinIndex.get(picked.id) : null;
+  const m = markerOf(picked);
   if (m) showHover(m, movement.endPosition); else hoverBox.hidden = true;
 }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+const pickBox = document.getElementById('pick');
+
+// scene.pick 的 id 对实体图元返回的是 Entity 实例，不是我们设的字符串 id
+function markerOf(picked) {
+  if (!picked || !picked.id) return null;
+  const key = typeof picked.id === 'string' ? picked.id : picked.id.id;
+  return pinIndex.get(key) || null;
+}
+
+function showPickCard(m, position) {
+  pickBox.innerHTML = '';
+  const title = document.createElement('div');
+  title.textContent = m.label || '(无名)';
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = [m.category, m.district, 'ref=' + m.ref].filter(Boolean).join(' · ');
+  const btn = document.createElement('button');
+  btn.className = 'primary';
+  btn.textContent = '以此为中心重问';
+  btn.onclick = () => { pickBox.hidden = true; askWithCenter(m); };
+  pickBox.append(title, meta, btn);
+  pickBox.style.left = Math.min(position.x + 14, window.innerWidth - 270) + 'px';
+  pickBox.style.top = Math.min(position.y + 10, window.innerHeight - 150) + 'px';
+  pickBox.hidden = false;
+}
+
+viewer.screenSpaceEventHandler.setInputAction((movement) => {
+  const picked = viewer.scene.pick(movement.position);
+  const m = markerOf(picked);
+  if (m && m.ref && candidateRefs.has(m.ref)) showPickCard(m, movement.position);
+  else pickBox.hidden = true;
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
 const $ = (id) => document.getElementById(id);
 
@@ -394,7 +476,75 @@ function renderTrace(invocations) {
   });
 }
 
+// 候选列表是「中心点确认」的落点：点一下就拿它重问，选择权交回给人。
+// 同时标出本次实际用的是哪一个——从「中心点坐标 == 候选坐标」反推，不做猜测。
+function renderCandidates(cands, activeRef, centerLon, centerLat) {
+  const box = $('candidates');
+  box.innerHTML = '';
+  cands.forEach((c) => {
+    const used = centerLon != null && c.lon === centerLon && c.lat === centerLat;
+    const btn = document.createElement('button');
+    btn.className = 'cand' + (c.ref === activeRef ? ' active' : '');
+    const name = document.createElement('div');
+    name.textContent = (c.ref === activeRef ? '✓ ' : '') + (c.label || '(无名)');
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = [c.category, c.district, c.ref, used ? '本次使用' : null]
+      .filter(Boolean).join(' · ');
+    btn.append(name, meta);
+    btn.onclick = () => askWithCenter(c);
+    box.appendChild(btn);
+  });
+}
+
+function askWithCenter(cand) {
+  const center = { lon: cand.lon, lat: cand.lat, label: cand.label, ref: cand.ref };
+  if (!lastQuestion) {
+    // 还没有问过，就把候选挂起来，等用户输入问题后一起提交
+    pendingCenter = center;
+    activeCenterRef = cand.ref;
+    renderCandidates(lastCandidates, activeCenterRef, null, null);
+    $('q').focus();
+    setStatus('已选定中心点「' + (cand.label || '(无名)') + '」，输入问题后点提问即可');
+    return;
+  }
+  $('q').value = lastQuestion;
+  ask(center);
+}
+
+// Agent 拒绝替你猜中心点时，这个入口仍然可用：直接查地名，不走 LLM
+async function findPlaces() {
+  const name = $('place-q').value.trim();
+  if (!name) { setStatus('请输入地名', true); return; }
+  setStatus('检索地名候选…');
+  try {
+    const res = await fetch('/api/places?name=' + encodeURIComponent(name));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+    const cands = data.candidates || [];
+    if (!cands.length) { setStatus('没有匹配的地名'); return; }
+    // 候选同时画到地图上：列表点选与地图点选两条路都通
+    applyHints({
+      kind: 'search',
+      camera: { lon: cands[0].lon, lat: cands[0].lat, height_m: 4000,
+                heading_deg: 0, pitch_deg: -60 },
+      markers: cands.map((c) => ({
+        id: c.ref, lon: c.lon, lat: c.lat, label: c.label,
+        kind: c.layer, ref: c.ref, category: c.category, district: c.district,
+      })),
+      candidates: cands,
+      path: null,
+      radius_m: null,
+      note: '地名候选：点地图上的标记或下方列表，即可把它定为查询中心。',
+    });
+    setStatus('找到 ' + cands.length + ' 个候选，点一个即可作为中心点');
+  } catch (e) {
+    setStatus('地名检索失败：' + e.message, true);
+  }
+}
+
 function render(data) {
+  lastQuestion = data.question || lastQuestion;
   $('answer').textContent = data.answer || '（模型未给出回答）';
   renderChecks(data.checks);
   renderTrace(data.invocations);
@@ -402,20 +552,24 @@ function render(data) {
   applyHints(data.visual_hints);
   const verdict = data.passed ? '自检全部通过' : '自检未全部通过';
   setStatus('#' + data.run_id + ' · ' + data.steps + ' 步 · ' + verdict
-            + ' · 数值溯源修复 ' + data.repair_rounds + ' 轮', !data.passed);
+            + ' · 数值溯源修复 ' + data.repair_rounds + ' 轮'
+            + (data.clarification ? ' · 已按你确认的中心点' : ''), !data.passed);
 }
 
-async function ask() {
+async function ask(centerArg) {
   const question = $('q').value.trim();
   if (!question) { setStatus('请先输入问题', true); return; }
+  const center = centerArg || pendingCenter || null;
+  pendingCenter = null;
+  activeCenterRef = center ? center.ref : null;
   const btn = $('ask');
   btn.disabled = true;
-  setStatus('Agent 运行中，通常 20–60 秒…');
+  setStatus(center ? '已按你确认的中心点重问，Agent 运行中…' : 'Agent 运行中，通常 20–60 秒…');
   try {
     const res = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify(center ? { question, center } : { question }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
@@ -458,6 +612,7 @@ async function replay(runId) {
   setStatus('回放 ' + runId + '…');
   try {
     const data = await (await fetch('/api/runs/' + encodeURIComponent(runId))).json();
+    if (data.question) lastQuestion = data.question;
     applyHints(data.visual_hints);
     $('report').textContent = data.report || '（无报告）';
     setStatus('已回放 ' + runId + '（仅地图与报告，问答面板保留当前内容）');
@@ -466,7 +621,9 @@ async function replay(runId) {
   }
 }
 
-$('ask').onclick = ask;
+$('ask').onclick = () => ask();
+$('place-find').onclick = findPlaces;
+$('place-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') findPlaces(); });
 document.querySelectorAll('.chip[data-q]').forEach((b) => {
   b.onclick = () => { $('q').value = b.dataset.q; ask(); };
 });
