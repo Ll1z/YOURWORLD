@@ -71,6 +71,26 @@ def render(run_result: AgentRun, checks: list[selfcheck.Check], run_dir: str, ts
     lines.append("## 结论（模型叙述）")
     lines.append("")
     lines.append(run_result.answer.strip() or "（模型未给出回答）")
+    if run_result.plan or run_result.verdict:
+        lines.append("")
+        lines.append("## 多 Agent：规划与复核")
+        lines.append("")
+        if run_result.plan:
+            lines.append(f"- 规划者重述：{run_result.plan.get('restated') or '（未给出）'}")
+            for k, sub in enumerate(run_result.plan.get('sub_questions') or [], 1):
+                lines.append(f"- 子问题{k}：{sub.get('question')}（建议工具 {sub.get('tool') or '未指定'}）")
+            for pitfall in run_result.plan.get('pitfalls') or []:
+                lines.append(f"- 规划者提示：{pitfall}")
+        if run_result.verdict:
+            lines.append(f"- 复核结论：{run_result.verdict.get('verdict') or '未判定'}；重做次数 {run_result.rework}")
+            for problem in run_result.verdict.get('problems') or []:
+                lines.append(f"- 复核指出的问题：{problem}")
+            for missing in run_result.verdict.get('missing') or []:
+                lines.append(f"- 复核认为没答到的子问题：{missing}")
+            if run_result.verdict.get('note'):
+                lines.append(f"- 说明：{run_result.verdict['note']}")
+        else:
+            lines.append("- 复核者没有给出结论")
     lines.append("")
     lines.append("## 空间自检")
     lines.append("")

@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 import eval as evalset  # noqa: E402
 from eval import executor  # noqa: E402
 
-from agent import report  # noqa: E402
+from agent import report, team  # noqa: E402
 from agent.config import Settings  # noqa: E402
 from agent.loop import run  # noqa: E402
 from agent.mcp_hub import MCPHub  # noqa: E402
@@ -137,8 +137,9 @@ async def run_agent(cases: list[dict], truth: dict, args) -> int:
                 mark = "OK " if invocation.ok else "ERR"
                 print(f"    [{mark}] {invocation.name}({json.dumps(invocation.arguments, ensure_ascii=False)[:90]})")
 
-            run_result = await run(case["question"], hub, settings,
-                                   max_steps=args.max_steps, on_event=on_event)
+            driver = team.run_team if args.mode == "team" else run
+            run_result = await driver(case["question"], hub, settings,
+                                      max_steps=args.max_steps, on_event=on_event)
             checks = report.checks_for(run_result)
             expected = (truth["cases"].get(case["id"]) or {}).get("expected") or {}
             scores = evalset.score_answer(case, expected, run_result, run_result.answer, checks)
@@ -159,14 +160,14 @@ async def run_agent(cases: list[dict], truth: dict, args) -> int:
                         print(f"        × {name}: {detail}")
 
     summary = evalset.summarize_scores(rows)
-    summary.update({"generated": ts, "mode": "agent", "tokens_total": tokens,
+    summary.update({"generated": ts, "mode": args.mode, "tokens_total": tokens,
                     "run_dir": str(run_dir), "max_steps": args.max_steps})
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "summary.json").write_text(
         json.dumps({"summary": summary, "cases": rows}, ensure_ascii=False, indent=1, default=str),
         encoding="utf-8")
 
-    lines = ["# Agent 层评测", "",
+    lines = [f"# {'多 Agent' if args.mode == 'team' else 'Agent'} 层评测", "",
              f"- 时间（UTC）：{ts}",
              f"- 用例：{summary['passed']}/{summary['total']} 通过",
              f"- 逐项通过率：{json.dumps(summary['by_check'], ensure_ascii=False)}",
@@ -179,7 +180,8 @@ async def run_agent(cases: list[dict], truth: dict, args) -> int:
     lines += ["", "> refusal / tool_error 两类用关键词做代理判定，不是语义判定。"]
     (run_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    print(f"\nagent 层：{summary['passed']}/{summary['total']} 通过，token 合计 {tokens}")
+    label = "多 Agent" if args.mode == "team" else "agent"
+    print(f"\n{label} 层：{summary['passed']}/{summary['total']} 通过，token 合计 {tokens}")
     print(f"逐项通过率：{json.dumps(summary['by_check'], ensure_ascii=False)}")
     if summary["failed_ids"]:
         print(f"未通过：{summary['failed_ids']}")
@@ -192,7 +194,7 @@ async def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["data", "agent"], default="data")
+    ap.add_argument("--mode", choices=["data", "agent", "team"], default="data")
     ap.add_argument("--only", default=None, help="逗号分隔的用例 id")
     ap.add_argument("--kind", default=None, help="逗号分隔的问法类别")
     ap.add_argument("--limit", type=int, default=None)

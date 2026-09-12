@@ -77,6 +77,10 @@ class AgentRun:
     usage: dict = field(default_factory=dict)
     spans: list[dict] = field(default_factory=list)
     span_warnings: list[str] = field(default_factory=list)
+    # 多 Agent 模式才有：规划者的计划、复核者的结论、重做次数
+    plan: dict | None = None
+    verdict: dict | None = None
+    rework: int = 0
 
     def tool_results(self) -> list[dict]:
         return [i.result for i in self.invocations]
@@ -96,6 +100,9 @@ class AgentRun:
             "context_uris": sorted(self.context),
             "spans": self.spans,
             "span_warnings": self.span_warnings,
+            "plan": self.plan,
+            "verdict": self.verdict,
+            "rework": self.rework,
         }
 
 
@@ -152,6 +159,7 @@ async def run(
     on_event=None,
     clarification: str | None = None,
     tracer: telemetry.Tracer | None = None,
+    extra_system: str = "",
 ) -> AgentRun:
     """一次提问的入口：起根 span → 跑循环 → 把 span 树挂回结果。
 
@@ -172,7 +180,8 @@ async def run(
             "geo.clarification": clarification,
         },
     ) as span:
-        result = await _drive(question, hub, settings, max_steps, on_event, clarification, tracer)
+        result = await _drive(question, hub, settings, max_steps, on_event, clarification, tracer,
+                              extra_system)
         span.set(**{
             telemetry.INPUT_TOKENS: result.usage.get("prompt_tokens", 0),
             telemetry.OUTPUT_TOKENS: result.usage.get("completion_tokens", 0),
@@ -194,6 +203,7 @@ async def _drive(
     on_event,
     clarification: str | None,
     tracer: telemetry.Tracer,
+    extra_system: str = "",
 ) -> AgentRun:
     client = OpenAI(
         api_key=settings.deepseek_api_key,
@@ -201,8 +211,12 @@ async def _drive(
         timeout=settings.request_timeout_s,
     )
     context = await hub.context()
+    system = SYSTEM_PROMPT + "\n\n" + _context_block(context)
+    if extra_system:
+        # 多 Agent 模式下这里是规划者/复核者给执行者的提示，用户原话仍然在 user 消息里
+        system += "\n\n" + extra_system
     messages: list[dict] = [
-        {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + _context_block(context)},
+        {"role": "system", "content": system},
         {"role": "user", "content": question + (f"\n\n{CLARIFICATION_TEMPLATE.format(note=clarification)}"
                                                 if clarification else "")},
     ]
@@ -292,6 +306,11 @@ async def _drive(
                 "content": _tool_content(ok, error, payload),
             })
 
+    if not answer:
+        # 步数触顶时不能就这么收场：工具结果都在 messages 里，只是没被讲出来。
+        # 补一次不带工具的收口，让它把已经拿到的东西说清楚。
+        answer = _finalize(client, settings, messages, usage, tracer)
+
     repair_rounds = 0
     if stopped == "final" and answer:
         pool = grounding_pool(question, clarification, context, invocations)
@@ -301,6 +320,38 @@ async def _drive(
                     repair_rounds=repair_rounds, clarification=clarification,
                     invocations=invocations,
                     context=context, usage=usage)
+
+
+def _finalize(client: OpenAI, settings: Settings, messages: list[dict], usage: dict,
+              tracer: telemetry.Tracer) -> str:
+    """步数用尽时的收口：不带工具，只让它把已经返回的工具结果讲清楚。
+
+    没有这一步，触顶的运行会以空答案收场——工具返回都拿到了，却什么都没说，
+    报告里只剩一句「模型未给出回答」。这一步同样不许产生数字：提示词里写死，
+    而且它是在步数上限之外的一次额外调用，代价可接受。
+    """
+    messages.append({
+        "role": "user",
+        "content": ("步数已用尽。现在不要再调用工具，只根据上面已经返回的工具结果给出最终回答："
+                    "能回答的部分给出结论与依据，没有数据支撑的部分如实说明缺什么。"
+                    "数字仍然只能来自上面的工具返回。"),
+    })
+    with tracer.span(f"chat {settings.deepseek_model}", telemetry.CHAT,
+                     **{telemetry.SYSTEM: "deepseek",
+                        telemetry.REQUEST_MODEL: settings.deepseek_model,
+                        "geo.finalize": True}) as span:
+        response = client.chat.completions.create(
+            model=settings.deepseek_model, messages=messages,
+            temperature=settings.temperature,
+        )
+        if response.usage:
+            for key in usage:
+                usage[key] += getattr(response.usage, key, 0) or 0
+            span.set(**{
+                telemetry.INPUT_TOKENS: getattr(response.usage, "prompt_tokens", 0) or 0,
+                telemetry.OUTPUT_TOKENS: getattr(response.usage, "completion_tokens", 0) or 0,
+            })
+    return response.choices[0].message.content or ""
 
 
 def _repair_ungrounded(

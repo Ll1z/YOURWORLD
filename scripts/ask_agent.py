@@ -14,7 +14,7 @@ import asyncio
 import json
 import sys
 
-from agent import report
+from agent import report, team
 from agent.config import Settings
 from agent.loop import run
 from agent.mcp_hub import MCPHub
@@ -30,6 +30,8 @@ async def main() -> int:
     ap.add_argument("--max-steps", type=int, default=6)
     ap.add_argument("--outdir", default=report.DEFAULT_OUTDIR)
     ap.add_argument("--quiet", action="store_true", help="不实时打印工具调用")
+    ap.add_argument("--team", action="store_true",
+                    help="多 Agent 模式：规划者 → 执行者 → 复核者")
     args = ap.parse_args()
 
     settings = Settings()
@@ -45,8 +47,9 @@ async def main() -> int:
         if not args.quiet:
             print(f"已连接 {len(hub.sessions)} 个 MCP Server，聚合 {len(hub.tools)} 个工具："
                   f"{', '.join(sorted(hub.tools))}")
-        run_result = await run(args.question, hub, settings,
-                               max_steps=args.max_steps, on_event=on_event)
+        driver = team.run_team if args.team else run
+        run_result = await driver(args.question, hub, settings,
+                                  max_steps=args.max_steps, on_event=on_event)
 
     artifacts = report.persist(run_result, args.outdir)
     print()
