@@ -21,7 +21,7 @@
 
 - Python 3.12，用 `uv` 管理解释器与虚拟环境
 - 空间计算：DuckDB（spatial / FTS / vss 扩展）、GeoPandas、Shapely 2、pyogrio
-- MCP：官方 Python SDK（FastMCP），先 stdio，稳定后 Streamable HTTP
+- MCP：官方 Python SDK `mcp` 2.x（`from mcp.server.mcpserver import MCPServer`；FastMCP 在 2.x 已更名为 MCPServer，`mcp.server.fastmcp` 路径会直接报错），先 stdio，稳定后 Streamable HTTP
 - 检索：DuckDB FTS + VSS 单文件索引起步，本地 bge 系列模型做 embedding 与 rerank
 - 模型：DeepSeek API（OpenAI 兼容接口），密钥只放 `.env`
 - 观测：OpenTelemetry GenAI 语义约定 + Langfuse（Stage 2 起接入）
