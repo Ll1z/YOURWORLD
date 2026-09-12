@@ -8,7 +8,7 @@
 - 目标：以个人学习为目的，跑通「地理空间分析 Agent」的完整前沿技术栈
 - 不商业化、不做产品包装，重点是架构理解与可复现的工程实现
 - 首个可验收能力：自然语言提问 → 自动发现数据 → 写代码算空间关系 → 空间自检 → 出图出报告
-- 当前阶段：Stage 1 进行中。数据接入已完成（北京五区边界 + OSM 切片 + 数据卡片）；三个 MCP Server（geo_catalog / geo_compute / geo_knowledge）已实现并通过 stdio 冒烟测试；Agent 循环与空间自检器待做。范围见 `HANDOFF.md`
+- 当前阶段：Stage 1 已完成。数据接入（北京五区边界 + OSM 切片 + 数据卡片）、三个 MCP Server（geo_catalog / geo_compute / geo_knowledge）、Agent 裸循环与空间自检器均已实现，端到端问答跑通并可复现。范围见 `HANDOFF.md`
 
 ## 沟通约定
 
@@ -52,7 +52,7 @@ Stage 1 骨架已于 2026-09-12 建立，当前结构：
 servers/geo_catalog/           MCP：数据目录 + 混合检索；数据卡片存 cards/
 servers/geo_compute/           MCP：DuckDB-spatial + 沙箱执行 + 出图
 servers/geo_knowledge/         MCP：标准 / 术语 / 方法库；坐标系口径与纠偏在 coords/
-agent/                         planner + 检索路由 + 循环 + 空间自检器
+agent/                         mcp_hub（聚合三个 MCP Server）+ loop（裸循环）+ selfcheck（空间自检）+ config
 sandbox/                       代码执行运行目录（每次运行独立子目录）
 eval/                          任务集 + 指标 + 消融实验
 data/                          样例数据与索引；raw 与 processed 默认不入库，地基数据走 .gitignore 白名单
@@ -71,7 +71,10 @@ servers/ 下的包以可编辑模式安装（hatchling），全项目可直接�
 3. `scripts/build_duckdb.py` —— 装载 DuckDB 并建立 R-tree 空间索引
 4. `scripts/ask_nearby.py` —— 端到端查询，产出 result.geojson / result.csv / query.sql / report.md
 5. `scripts/mcp_smoke_test.py` —— stdio 拉起三个 MCP Server，全量校验 tools / resources / resource templates 与工具调用
+6. `scripts/ask_agent.py "问题"` —— Agent 裸循环：自然语言 → 选 MCP 工具 → 答案 + 空间自检 + visual_hints（为 Cesium 预留）
 
 查询口径只有一处实现：`servers/geo_compute/query.py`。MCP Tool `query_nearby` 与 `scripts/ask_nearby.py` 都调用它，禁止在别处重写 SQL。
+
+空间自检器（`agent/selfcheck.py`）做五项检查：CRS、单位、几何有效性、量级自洽，以及**数值溯源**——最终回答里的每个数字都必须能在工具返回中找到出处。溯源不通过时循环会把回答打回重写（最多 2 轮）。实测模型确实会在叙述里自行估算两个设施之间的距离，只在提示词里禁止是不够的。
 
 辅助脚本：`calibrate_gcj02.py`（纠偏算法校准）、`check_boundaries.py`（边界完整性体检）、`analyze_poi_overlap.py`（点面重复量化）

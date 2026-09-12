@@ -79,7 +79,7 @@ def get_schema() -> dict:
 
 
 @mcp.tool()
-def query_nearby(lon: float = None, lat: float = None, radius_m: float = 1000.0,
+def query_nearby(lon: float | None = None, lat: float | None = None, radius_m: float = 1000.0,
                  district: str | None = None, preset: str = "medical") -> NearbyResult:
     """查询一个点周围指定半径内有哪些设施，返回按距离升序的明细。
 
