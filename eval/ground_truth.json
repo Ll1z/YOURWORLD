@@ -1,0 +1,1436 @@
+{
+ "version": "1.0",
+ "generated": "20260912T103931Z",
+ "generator": "scripts/build_eval.py",
+ "fingerprint": {
+  "servers/geo_compute/query.py": "d322eedeaad9d12e",
+  "servers/geo_compute/server.py": "41fa9bea74b4db7d",
+  "servers/geo_knowledge/poi_scope.json": "31979b2d1db094c8",
+  "servers/geo_knowledge/categories/aliases.json": "8f3b01c32cc321f8",
+  "data/processed/geo.duckdb": "19673088:1789205069"
+ },
+ "cases": {
+  "nearby-001": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 800,
+    "categories": [
+     "便利店",
+     "超市"
+    ],
+    "lon": 116.3132061,
+    "lat": 39.9740057
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/5196349280",
+    "name": "中关村",
+    "lon": 116.3132061,
+    "lat": 39.9740057,
+    "district": "海淀区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 7,
+    "count_point": 7,
+    "count_area": 0,
+    "categories": {
+     "shop=convenience": 3,
+     "shop=supermarket": 4
+    },
+    "nearest": [
+     [
+      "便利蜂",
+      161.6
+     ],
+     [
+      "7-Eleven",
+      174.5
+     ],
+     [
+      "烟酒商行",
+      461.7
+     ]
+    ]
+   }
+  },
+  "nearby-002": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 10000,
+    "categories": [
+     "高校"
+    ],
+    "lon": 116.37583420000001,
+    "lat": 39.966828500000005
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/12430713734",
+    "name": "马甸桥",
+    "lon": 116.37583420000001,
+    "lat": 39.966828500000005,
+    "district": "西城区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 158,
+    "count_point": 39,
+    "count_area": 119,
+    "categories": {
+     "amenity=university": 90,
+     "amenity=college": 68
+    },
+    "nearest": [
+     [
+      "西黃寺（中国藏语系高级佛学院）",
+      813.6
+     ],
+     [
+      "人工智能学院",
+      1436.7
+     ],
+     [
+      "",
+      1583.7
+     ]
+    ]
+   }
+  },
+  "nearby-003": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 2000,
+    "categories": [
+     "高校"
+    ],
+    "lon": 116.37583420000001,
+    "lat": 39.966828500000005
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/12430713734",
+    "name": "马甸桥",
+    "lon": 116.37583420000001,
+    "lat": 39.966828500000005,
+    "district": "西城区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 6,
+    "count_point": 3,
+    "count_area": 3,
+    "categories": {
+     "amenity=university": 2,
+     "amenity=college": 4
+    },
+    "nearest": [
+     [
+      "西黃寺（中国藏语系高级佛学院）",
+      813.6
+     ],
+     [
+      "人工智能学院",
+      1436.7
+     ],
+     [
+      "",
+      1583.7
+     ]
+    ]
+   }
+  },
+  "nearby-004": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 1000,
+    "categories": [
+     "医院"
+    ],
+    "lon": 116.40527890000001,
+    "lat": 39.906949600000004
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/6617849503",
+    "name": "王府井",
+    "lon": 116.40527890000001,
+    "lat": 39.906949600000004,
+    "district": "东城区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 4,
+    "count_point": 0,
+    "count_area": 4,
+    "categories": {
+     "amenity=hospital": 4
+    },
+    "nearest": [
+     [
+      "北京协和医院",
+      588.6
+     ],
+     [
+      "北京医院",
+      594.4
+     ],
+     [
+      "首都医科大学附属北京同仁医院",
+      790.2
+     ]
+    ]
+   }
+  },
+  "nearby-005": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 1000,
+    "categories": [
+     "银行"
+    ],
+    "lon": 116.333089,
+    "lat": 39.9918957
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/5196357163",
+    "name": "五道口",
+    "lon": 116.333089,
+    "lat": 39.9918957,
+    "district": "海淀区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 16,
+    "count_point": 16,
+    "count_area": 0,
+    "categories": {
+     "amenity=bank": 16
+    },
+    "nearest": [
+     [
+      "中国工商银行",
+      66.4
+     ],
+     [
+      "中国光大银行",
+      522.4
+     ],
+     [
+      "中信银行",
+      593.2
+     ]
+    ]
+   }
+  },
+  "nearby-006": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 3000,
+    "categories": [
+     "公园"
+    ],
+    "lon": 116.39126301779459,
+    "lat": 39.907359
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "poi_area/8847697",
+    "name": "天安门",
+    "lon": 116.39126301779459,
+    "lat": 39.907359,
+    "district": "东城区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 67,
+    "count_point": 1,
+    "count_area": 66,
+    "categories": {
+     "leisure=park": 67
+    },
+    "nearest": [
+     [
+      "",
+      347.4
+     ],
+     [
+      "",
+      366.6
+     ],
+     [
+      "太子林",
+      418.6
+     ]
+    ]
+   }
+  },
+  "nearby-007": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 2000,
+    "categories": [
+     "加油站"
+    ],
+    "lon": 116.3727527,
+    "lat": 39.8635548
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/5158580594",
+    "name": "北京南站",
+    "lon": 116.3727527,
+    "lat": 39.8635548,
+    "district": "丰台区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 5,
+    "count_point": 0,
+    "count_area": 5,
+    "categories": {
+     "amenity=fuel": 5
+    },
+    "nearest": [
+     [
+      "壳牌",
+      855.5
+     ],
+     [
+      "中国石油",
+      1446.4
+     ],
+     [
+      "阳光石油",
+      1460.6
+     ]
+    ]
+   }
+  },
+  "nearby-008": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 1000,
+    "categories": [
+     "咖啡馆"
+    ],
+    "lon": 116.44881260000001,
+    "lat": 39.936104900000004
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/5196308746",
+    "name": "三里屯",
+    "lon": 116.44881260000001,
+    "lat": 39.936104900000004,
+    "district": "朝阳区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 42,
+    "count_point": 42,
+    "count_area": 0,
+    "categories": {
+     "amenity=cafe": 42
+    },
+    "nearest": [
+     [
+      "Village Cafe",
+      28.2
+     ],
+     [
+      "Costa咖啡",
+      37.1
+     ],
+     [
+      "Gruba",
+      91.9
+     ]
+    ]
+   }
+  },
+  "nearby-009": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 2000,
+    "categories": [
+     "幼儿园"
+    ],
+    "lon": 116.47318510000001,
+    "lat": 40.0196291
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/2098804276",
+    "name": "望京",
+    "lon": 116.47318510000001,
+    "lat": 40.0196291,
+    "district": "朝阳区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 5,
+    "count_point": 0,
+    "count_area": 5,
+    "categories": {
+     "amenity=kindergarten": 5
+    },
+    "nearest": [
+     [
+      "教育国资中心幼儿园瑞平西园",
+      1135.7
+     ],
+     [
+      "北纬蓝天幼儿园",
+      1274.2
+     ],
+     [
+      "教育国资中心幼儿园瑞平东园",
+      1443.0
+     ]
+    ]
+   }
+  },
+  "nearby-010": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 3000,
+    "categories": [
+     "博物馆"
+    ],
+    "lon": 116.4725284,
+    "lat": 39.9323096
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/3363577821",
+    "name": "朝阳公园",
+    "lon": 116.4725284,
+    "lat": 39.9323096,
+    "district": "朝阳区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 5,
+    "count_point": 3,
+    "count_area": 2,
+    "categories": {
+     "tourism=museum": 5
+    },
+    "nearest": [
+     [
+      "Encuéntrate con México",
+      1243.1
+     ],
+     [
+      "全国农业展览馆;中国农业博物馆",
+      1386.7
+     ],
+     [
+      "朝阳规划艺术馆",
+      1428.2
+     ]
+    ]
+   }
+  },
+  "nearby-011": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 500,
+    "categories": [
+     "加油站"
+    ],
+    "lon": 116.39076940577283,
+    "lat": 39.91727565
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "poi_area/9511883",
+    "name": "故宫",
+    "lon": 116.39076940577283,
+    "lat": 39.91727565,
+    "district": "东城区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 0,
+    "count_point": 0,
+    "count_area": 0,
+    "categories": {
+     "amenity=fuel": 0
+    },
+    "nearest": []
+   }
+  },
+  "nearby-012": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 3000,
+    "categories": [
+     "健身房"
+    ],
+    "lon": 116.32115579670244,
+    "lat": 39.9388436
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "poi_area/77083638",
+    "name": "首都体育馆",
+    "lon": 116.32115579670244,
+    "lat": 39.9388436,
+    "district": "海淀区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 1,
+    "count_point": 0,
+    "count_area": 1,
+    "categories": {
+     "leisure=fitness_centre": 1
+    },
+    "nearest": [
+     [
+      "体育馆",
+      2016.1
+     ]
+    ]
+   }
+  },
+  "nearby-013": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 2000,
+    "categories": [
+     "酒店"
+    ],
+    "lon": 116.42095440000001,
+    "lat": 39.9035987
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/4846712797",
+    "name": "北京站",
+    "lon": 116.42095440000001,
+    "lat": 39.9035987,
+    "district": "东城区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 84,
+    "count_point": 62,
+    "count_area": 22,
+    "categories": {
+     "tourism=hotel": 77,
+     "tourism=guest_house": 2,
+     "tourism=hostel": 5,
+     "tourism=motel": 0
+    },
+    "nearest": [
+     [
+      "",
+      157.4
+     ],
+     [
+      "北京宝辰饭店",
+      171.1
+     ],
+     [
+      "北京城市青年酒店",
+      180.5
+     ]
+    ]
+   }
+  },
+  "nearby-014": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 2000,
+    "categories": [
+     "餐厅"
+    ],
+    "lon": 116.40287159199698,
+    "lat": 39.879906649999995
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "poi_area/24824550",
+    "name": "天坛公园",
+    "lon": 116.40287159199698,
+    "lat": 39.879906649999995,
+    "district": "东城区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 58,
+    "count_point": 51,
+    "count_area": 7,
+    "categories": {
+     "amenity=restaurant": 58
+    },
+    "nearest": [
+     [
+      "天坛福宴",
+      363.5
+     ],
+     [
+      "",
+      848.3
+     ],
+     [
+      "东来顺",
+      859.4
+     ]
+    ]
+   }
+  },
+  "nearby-015": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 5000,
+    "categories": [
+     "高校"
+    ],
+    "district": "西城区",
+    "lon": 116.37583420000001,
+    "lat": 39.966828500000005
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/12430713734",
+    "name": "马甸桥",
+    "lon": 116.37583420000001,
+    "lat": 39.966828500000005,
+    "district": "西城区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 2,
+    "count_point": 0,
+    "count_area": 2,
+    "categories": {
+     "amenity=university": 1,
+     "amenity=college": 1
+    },
+    "nearest": [
+     [
+      "北京师范大学继续教育与教师培训学院",
+      3528.8
+     ],
+     [
+      "北京建筑大学（西城校区）",
+      4998.8
+     ]
+    ]
+   }
+  },
+  "nearby-016": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 2000,
+    "categories": [
+     "amenity=university"
+    ],
+    "lon": 116.3132061,
+    "lat": 39.9740057
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/5196349280",
+    "name": "中关村",
+    "lon": 116.3132061,
+    "lat": 39.9740057,
+    "district": "海淀区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 6,
+    "count_point": 1,
+    "count_area": 5,
+    "categories": {
+     "amenity=university": 6
+    },
+    "nearest": [
+     [
+      "中国人民大学",
+      717.7
+     ],
+     [
+      "中国人民大学北校区",
+      729.3
+     ],
+     [
+      "中国科学院大学中关村校区",
+      1567.3
+     ]
+    ]
+   }
+  },
+  "nearby-017": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 10000,
+    "categories": [
+     "科研院所"
+    ],
+    "lon": 116.37583420000001,
+    "lat": 39.966828500000005
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/12430713734",
+    "name": "马甸桥",
+    "lon": 116.37583420000001,
+    "lat": 39.966828500000005,
+    "district": "西城区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 234,
+    "count_point": 96,
+    "count_area": 138,
+    "categories": {
+     "amenity=research_institute": 104,
+     "office=research": 130
+    },
+    "nearest": [
+     [
+      "中国科学院大气物理研究所铁塔分部",
+      913.8
+     ],
+     [
+      "中国科学院地质与地球物理研究所",
+      1034.1
+     ],
+     [
+      "中国科学院地震研究所",
+      1044.3
+     ]
+    ]
+   }
+  },
+  "nearby-018": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 3000,
+    "categories": [
+     "充电桩"
+    ],
+    "lon": 116.4552314,
+    "lat": 39.8920933
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/3369459833",
+    "name": "双井",
+    "lon": 116.4552314,
+    "lat": 39.8920933,
+    "district": "朝阳区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 2,
+    "count_point": 2,
+    "count_area": 0,
+    "categories": {
+     "amenity=charging_station": 2
+    },
+    "nearest": [
+     [
+      "小鹏",
+      1846.0
+     ],
+     [
+      "Tesla Supercharger",
+      2109.4
+     ]
+    ]
+   }
+  },
+  "nearby-019": {
+   "kind": "tool_error",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 1000,
+    "categories": [
+     "地铁站"
+    ],
+    "lon": 116.2999736,
+    "lat": 39.9743281
+   },
+   "ok": false,
+   "error": "{'text': 'Error executing tool query_nearby: 地铁站 不在可查询范围内：地铁站在 anchor 层（railway=station）只用于定位，不参与半径设施检索：query_nearby 只覆盖 poi_point 与 poi_area 两层，railway 标签不在其中'}",
+   "center": {
+    "ref": "anchor/5448587388",
+    "name": "苏州街",
+    "lon": 116.2999736,
+    "lat": 39.9743281,
+    "district": "海淀区",
+    "match_score": 3
+   },
+   "expected": {
+    "error": "{'text': 'Error executing tool query_nearby: 地铁站 不在可查询范围内：地铁站在 anchor 层（railway=station）只用于定位，不参与半径设施检索：query_nearby 只覆盖 poi_point 与 poi_area 两层，railway 标签不在其中'}"
+   }
+  },
+  "nearby-020": {
+   "kind": "tool_error",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 3000,
+    "categories": [
+     "医院院"
+    ],
+    "lon": 116.37583420000001,
+    "lat": 39.966828500000005
+   },
+   "ok": false,
+   "error": "{'text': \"Error executing tool query_nearby: 不认识的类别 '医院院'。别名里接近的有 ['医院', '宠物医院']。完整清单见 compute://categories\"}",
+   "center": {
+    "ref": "anchor/12430713734",
+    "name": "马甸桥",
+    "lon": 116.37583420000001,
+    "lat": 39.966828500000005,
+    "district": "西城区",
+    "match_score": 3
+   },
+   "expected": {
+    "error": "{'text': \"Error executing tool query_nearby: 不认识的类别 '医院院'。别名里接近的有 ['医院', '宠物医院']。完整清单见 compute://categories\"}"
+   }
+  },
+  "nearby-021": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 3000,
+    "categories": [
+     "医院"
+    ],
+    "lon": 116.37583420000001,
+    "lat": 39.966828500000005
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/12430713734",
+    "name": "马甸桥",
+    "lon": 116.37583420000001,
+    "lat": 39.966828500000005,
+    "district": "西城区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 22,
+    "count_point": 5,
+    "count_area": 17,
+    "categories": {
+     "amenity=hospital": 22
+    },
+    "nearest": [
+     [
+      "北京二龙路医院",
+      974.0
+     ],
+     [
+      "北京国都医院",
+      1229.9
+     ],
+     [
+      "",
+      1343.2
+     ]
+    ]
+   }
+  },
+  "agg-001": {
+   "kind": "aggregate",
+   "tool": "summarize_poi",
+   "args": {
+    "district": "东城区",
+    "categories": [
+     "医院"
+    ]
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "count_total": 29,
+    "categories": {
+     "amenity=hospital": 29
+    },
+    "by_district": {
+     "东城区": 29
+    },
+    "by_category": {
+     "amenity=hospital": 29
+    }
+   }
+  },
+  "agg-002": {
+   "kind": "aggregate",
+   "tool": "summarize_poi",
+   "args": {
+    "district": "东城区",
+    "categories": [
+     "amenity=hospital",
+     "amenity=clinic",
+     "amenity=doctors"
+    ]
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "count_total": 34,
+    "categories": {
+     "amenity=hospital": 29,
+     "amenity=clinic": 5,
+     "amenity=doctors": 0
+    },
+    "by_district": {
+     "东城区": 34
+    },
+    "by_category": {
+     "amenity=hospital": 29,
+     "amenity=clinic": 5
+    }
+   },
+   "cross_check": {
+    "expected": 34,
+    "actual": 34,
+    "source": "servers/geo_knowledge/poi_scope.json",
+    "passed": true
+   }
+  },
+  "agg-003": {
+   "kind": "aggregate",
+   "tool": "summarize_poi",
+   "args": {
+    "categories": [
+     "hospital",
+     "clinic",
+     "doctors",
+     "pharmacy"
+    ]
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "count_total": 455,
+    "categories": {
+     "hospital": 283,
+     "clinic": 47,
+     "doctors": 7,
+     "pharmacy": 118
+    },
+    "by_district": {
+     "朝阳区": 164,
+     "海淀区": 130,
+     "西城区": 56,
+     "丰台区": 54,
+     "东城区": 51
+    },
+    "by_category": {
+     "hospital": 283,
+     "pharmacy": 118,
+     "clinic": 47,
+     "doctors": 7
+    }
+   },
+   "cross_check": {
+    "expected": 455,
+    "actual": 455,
+    "source": "servers/geo_knowledge/poi_scope.json",
+    "passed": true
+   }
+  },
+  "agg-011": {
+   "kind": "aggregate",
+   "tool": "summarize_poi",
+   "args": {
+    "categories": [
+     "amenity=hospital",
+     "amenity=clinic",
+     "amenity=doctors",
+     "amenity=pharmacy"
+    ]
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "count_total": 453,
+    "categories": {
+     "amenity=hospital": 282,
+     "amenity=clinic": 46,
+     "amenity=doctors": 7,
+     "amenity=pharmacy": 118
+    },
+    "by_district": {
+     "朝阳区": 164,
+     "海淀区": 129,
+     "西城区": 55,
+     "丰台区": 54,
+     "东城区": 51
+    },
+    "by_category": {
+     "amenity=hospital": 282,
+     "amenity=pharmacy": 118,
+     "amenity=clinic": 46,
+     "amenity=doctors": 7
+    }
+   }
+  },
+  "agg-004": {
+   "kind": "aggregate",
+   "tool": "summarize_poi",
+   "args": {
+    "district": "海淀区",
+    "categories": [
+     "高校"
+    ]
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "count_total": 131,
+    "categories": {
+     "amenity=university": 63,
+     "amenity=college": 68
+    },
+    "by_district": {
+     "海淀区": 131
+    },
+    "by_category": {
+     "amenity=college": 68,
+     "amenity=university": 63
+    }
+   }
+  },
+  "agg-005": {
+   "kind": "aggregate",
+   "tool": "summarize_poi",
+   "args": {
+    "district": "朝阳区",
+    "categories": [
+     "公园"
+    ]
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "count_total": 533,
+    "categories": {
+     "leisure=park": 533
+    },
+    "by_district": {
+     "朝阳区": 533
+    },
+    "by_category": {
+     "leisure=park": 533
+    }
+   }
+  },
+  "agg-006": {
+   "kind": "aggregate",
+   "tool": "summarize_poi",
+   "args": {
+    "district": "西城区",
+    "categories": [
+     "药店"
+    ]
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "count_total": 15,
+    "categories": {
+     "amenity=pharmacy": 15
+    },
+    "by_district": {
+     "西城区": 15
+    },
+    "by_category": {
+     "amenity=pharmacy": 15
+    }
+   }
+  },
+  "agg-007": {
+   "kind": "aggregate",
+   "tool": "summarize_poi",
+   "args": {
+    "district": "丰台区",
+    "categories": [
+     "学校"
+    ]
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "count_total": 177,
+    "categories": {
+     "amenity=school": 177
+    },
+    "by_district": {
+     "丰台区": 177
+    },
+    "by_category": {
+     "amenity=school": 177
+    }
+   }
+  },
+  "agg-008": {
+   "kind": "aggregate",
+   "tool": "summarize_poi",
+   "args": {
+    "categories": [
+     "便利店",
+     "超市"
+    ]
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "count_total": 937,
+    "categories": {
+     "shop=convenience": 530,
+     "shop=supermarket": 407
+    },
+    "by_district": {
+     "朝阳区": 397,
+     "海淀区": 256,
+     "东城区": 141,
+     "西城区": 84,
+     "丰台区": 59
+    },
+    "by_category": {
+     "shop=convenience": 530,
+     "shop=supermarket": 407
+    }
+   }
+  },
+  "agg-009": {
+   "kind": "aggregate",
+   "tool": "summarize_poi",
+   "args": {
+    "district": "海淀区",
+    "categories": [
+     "银行"
+    ]
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "count_total": 248,
+    "categories": {
+     "amenity=bank": 248
+    },
+    "by_district": {
+     "海淀区": 248
+    },
+    "by_category": {
+     "amenity=bank": 248
+    }
+   }
+  },
+  "agg-010": {
+   "kind": "aggregate",
+   "tool": "summarize_poi",
+   "args": {
+    "district": "东城区",
+    "categories": [
+     "加油站"
+    ]
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "count_total": 12,
+    "categories": {
+     "amenity=fuel": 12
+    },
+    "by_district": {
+     "东城区": 12
+    },
+    "by_category": {
+     "amenity=fuel": 12
+    }
+   }
+  },
+  "dist-001": {
+   "kind": "distance",
+   "tool": "distance_between",
+   "args": {
+    "a_ref": "poi_area/19126182",
+    "b_ref": "anchor/6617849503"
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "planar_distance_m": 588.6,
+    "geodesic_distance_m": 588.81,
+    "planar_vs_geodesic_pct": 0.0368,
+    "bearing_deg": 219.33
+   }
+  },
+  "dist-002": {
+   "kind": "distance",
+   "tool": "distance_between",
+   "args": {
+    "a_ref": "anchor/5196349280",
+    "b_ref": "anchor/6617849503"
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "planar_distance_m": 10829.37,
+    "geodesic_distance_m": 10833.31,
+    "planar_vs_geodesic_pct": 0.0363,
+    "bearing_deg": 133.39
+   }
+  },
+  "dist-003": {
+   "kind": "distance",
+   "tool": "distance_between",
+   "args": {
+    "a_ref": "anchor/5196357163",
+    "b_ref": "anchor/5196349280"
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "planar_distance_m": 2612.49,
+    "geodesic_distance_m": 2613.43,
+    "planar_vs_geodesic_pct": 0.0359,
+    "bearing_deg": 220.54
+   }
+  },
+  "dist-004": {
+   "kind": "distance",
+   "tool": "distance_between",
+   "args": {
+    "a_ref": "anchor/5158580594",
+    "b_ref": "anchor/4846712797"
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "planar_distance_m": 6061.47,
+    "geodesic_distance_m": 6063.7,
+    "planar_vs_geodesic_pct": 0.0367,
+    "bearing_deg": 42.83
+   }
+  },
+  "dist-005": {
+   "kind": "distance",
+   "tool": "distance_between",
+   "args": {
+    "a_ref": "poi_area/8847697",
+    "b_ref": "poi_area/9511883"
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "planar_distance_m": 1101.48,
+    "geodesic_distance_m": 1101.88,
+    "planar_vs_geodesic_pct": 0.0367,
+    "bearing_deg": 357.81
+   }
+  },
+  "dist-006": {
+   "kind": "distance",
+   "tool": "distance_between",
+   "args": {
+    "a_ref": "anchor/12430713734",
+    "b_ref": "anchor/5196349280"
+   },
+   "ok": true,
+   "error": null,
+   "center": {},
+   "expected": {
+    "planar_distance_m": 5407.43,
+    "geodesic_distance_m": 5409.38,
+    "planar_vs_geodesic_pct": 0.0361,
+    "bearing_deg": 278.49
+   }
+  },
+  "places-001": {
+   "kind": "places",
+   "tool": "find_places",
+   "args": {
+    "name": "王府井",
+    "limit": 3
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/6617849503",
+    "name": "王府井",
+    "lon": 116.40527890000001,
+    "lat": 39.906949600000004,
+    "district": "东城区",
+    "match_score": 3
+   },
+   "expected": {
+    "hits": [
+     [
+      "王府井",
+      "anchor/6617849503",
+      3
+     ],
+     [
+      "王府井",
+      "anchor/9317006992",
+      3
+     ],
+     [
+      "王府井",
+      "anchor/9317006993",
+      3
+     ]
+    ]
+   }
+  },
+  "places-002": {
+   "kind": "places",
+   "tool": "find_places",
+   "args": {
+    "name": "五道口",
+    "limit": 3
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/5196357163",
+    "name": "五道口",
+    "lon": 116.333089,
+    "lat": 39.9918957,
+    "district": "海淀区",
+    "match_score": 3
+   },
+   "expected": {
+    "hits": [
+     [
+      "五道口",
+      "anchor/5196357163",
+      3
+     ],
+     [
+      "五道口",
+      "anchor/5442237543",
+      3
+     ],
+     [
+      "五道口",
+      "anchor/1420957578",
+      3
+     ]
+    ]
+   }
+  },
+  "places-003": {
+   "kind": "places",
+   "tool": "find_places",
+   "args": {
+    "name": "北京协和医院",
+    "limit": 3
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "poi_area/19126182",
+    "name": "北京协和医院",
+    "lon": 116.4096429889441,
+    "lat": 39.9110517,
+    "district": "东城区",
+    "match_score": 3
+   },
+   "expected": {
+    "hits": [
+     [
+      "北京协和医院",
+      "poi_area/19126182",
+      3
+     ],
+     [
+      "北京协和医院院史馆",
+      "poi_area/258088745",
+      2
+     ],
+     [
+      "北京协和医院（西区）",
+      "poi_area/922427110",
+      2
+     ]
+    ]
+   }
+  },
+  "refusal-001": {
+   "kind": "refusal",
+   "tool": null,
+   "args": {},
+   "ok": false,
+   "error": "该用例只由 agent 层判定",
+   "center": {},
+   "expected": {}
+  },
+  "refusal-002": {
+   "kind": "refusal",
+   "tool": null,
+   "args": {},
+   "ok": false,
+   "error": "该用例只由 agent 层判定",
+   "center": {},
+   "expected": {}
+  }
+ }
+}

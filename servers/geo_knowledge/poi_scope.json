@@ -16,7 +16,7 @@
   },
 
   "why_no_geometric_dedup": {
-    "evidence": "五区内医疗类 POI 共 441 个（点 224 + 面 231）。用 150 m 邻域做点面配对，仅 14 对（6.1%）匹配，且其中只有 6 对名称相符。",
+    "evidence": "五区内医疗类 POI 共 455 个（点 224 + 面 231；按 category_value 全键统计，含 healthcare=hospital/clinic 2 条）。用 150 m 邻域做点面配对，仅 14 对（6.1%）匹配，且其中只有 6 对名称相符。此数与 eval 用例 agg-003 绑定：数字改动必须同时改用例，否则 run_eval 会报不一致。",
     "interpretation": "OSM 数据模型下同一实体只会是 node 或 way/relation 之一。邻域内的其余配对是真实存在的相邻独立设施（如院区内独立药房、门诊部），几何去重会错误合并它们。",
     "residual_duplication": "约 2.6%（6/231）的面存在同名邻近点，属测绘时点面双挂，是已知的少量噪声。",
     "cost_of_wrong_choice": "几何去重会把院内独立设施误合并，损失比双挂噪声更大，因此默认不去重。"

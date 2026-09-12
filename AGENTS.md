@@ -4,7 +4,7 @@
 
 ## 项目定位
 
-- 名称：GeoAnalyst（工作目录 `FAKNEWS`，目录名沿用了早期想法，与本项目主题无关）
+- 名称：GeoAnalyst（工作目录 `YOURWORLD`）
 - 目标：以个人学习为目的，跑通「地理空间分析 Agent」的完整前沿技术栈
 - 不商业化、不做产品包装，重点是架构理解与可复现的工程实现
 - 首个可验收能力：自然语言提问 → 自动发现数据 → 写代码算空间关系 → 空间自检 → 出图出报告
@@ -57,9 +57,9 @@ servers/geo_knowledge/         MCP：标准 / 术语 / 方法库；坐标系口�
 agent/                         mcp_hub（聚合三个 MCP Server）+ loop（裸循环）+ selfcheck（空间自检）+ config
 web/                           FastAPI 薄壳（server.py）与 Cesium 前端（index.html），只消费 agent/report.py 的产物
 sandbox/                       代码执行运行目录（每次运行独立子目录）
-eval/                          任务集 + 指标 + 消融实验
+eval/                          评测集：cases.json 题库、ground_truth.json 冻结期望值、__init__.py/executor.py 比对与判定、runs/ 每次跑的产物（不入库）
 data/                          样例数据与索引；raw 与 processed 默认不入库，地基数据走 .gitignore 白名单
-scripts/                       一次性数据准备与验证脚本；类别别名对库校验见 check_categories.py
+scripts/                       一次性数据准备、验证与评测脚本；类别别名对库校验见 check_categories.py，评测入口见 build_eval.py / run_eval.py
 HANDOFF/                       项目交接包（HANDOFF.md、原始会话记录、打包 zip）
 ```
 
@@ -75,7 +75,11 @@ servers/ 下的包以可编辑模式安装（hatchling），全项目可直接�
 4. `scripts/ask_nearby.py` —— 端到端查询，产出 result.geojson / result.csv / query.sql / report.md
 5. `scripts/mcp_smoke_test.py` —— stdio 拉起三个 MCP Server，全量校验 tools / resources / resource templates 与工具调用
 6. `scripts/ask_agent.py "问题"` —— Agent 裸循环：自然语言 → 选 MCP 工具 → 答案 + 空间自检 + visual_hints（前端消费）
-7. `web/server.py` —— Web 入口：`uv run python web/server.py --port 8000`，浏览器打开 `http://127.0.0.1:8000`
+7. `scripts/build_eval.py` —— 跑真实工具生成/刷新 `eval/ground_truth.json`，并做 cross_check 一致性断言
+8. `scripts/run_eval.py` —— 评测：`--mode data` 零 token 逐字段比对冻结值；`--mode agent` 真跑 Agent，判定工具选择、数值溯源、关键数字与拒答行为
+9. `web/server.py` —— Web 入口：`uv run python web/server.py --port 8000`，浏览器打开 `http://127.0.0.1:8000`
+
+评测集是这一层的回归网。题库 `eval/cases.json` 每条用例都钉死查询中心（`center_ref` 指向具体锚点——同名候选相距数百米，会改变半径边缘设施的进出）；期望值不手写，由 `scripts/build_eval.py` 跑真实工具生成并冻结，`fingerprint` 里带 query.py / server.py / poi_scope.json / aliases.json 的哈希与 DB 大小、mtime，任何口径、别名或数据漂移都会显形。改动查询口径、别名表或数据之后，必须重跑 `build_eval.py` 再跑 `run_eval.py --mode data`。`--mode agent` 另外判定四件事：调了哪个工具、数字能否溯源、关键数字是否出现在答案里、该拒绝的是否拒绝；用例标 `agent_skip` 表示「两种正确行为无法用固定关键词区分」，只在 data 层断言。
 
 Agent 循环跑在 `web/server.py` 里的独立后台事件循环中：MCP stdio 会话绑定在创建它的 loop 上，且 OpenAI SDK 同步阻塞，直接跑在 web 的 loop 上会让一次提问把静态页面一起卡住。天地图 Key 只在渲染 `index.html` 时注入，不落盘、不入库。
 
