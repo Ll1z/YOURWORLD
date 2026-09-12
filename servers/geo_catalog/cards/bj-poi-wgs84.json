@@ -18,7 +18,7 @@
   },
   "schema": {
     "osm_type": "node / way / relation",
-    "osm_id": "OSM 要素 id，字符串类型",
+    "osm_id": "OSM 要素 id，字符串类型。面层主键是 (osm_type, osm_id) 组合：way 与 relation 的编号空间独立，同号不代表同一要素（实测本数据集无同号，但仍按组合键处理）",
     "name": "名称，可为空",
     "category_key": "主分类所属键，按 PRIORITY 顺序取第一个命中",
     "category_value": "主分类取值，如 hospital / convenience",
@@ -48,6 +48,8 @@
     "note": "点层含 POI 标签的占 points 图层 16.3%；面层占 multipolygons 的 12.8%"
   },
   "known_pitfalls": [
+    "GDAL 的 OSM multipolygons 层把要素 id 拆成两个互斥字段：来自 relation 的填 osm_id，来自闭合 way 的填 osm_way_id（实测 208706 行中 osm_id 非空 2261、osm_way_id 非空 206445、两者同时非空 0）。只读 osm_id 会让 99% 的面要素丢失身份。必须 coalesce，实现见 scripts/build_poi.py 的 polygon_identity；此坑在 2026-09-12 修复前污染过一版 poi_area。",
+    "面层的 type 列是关系标签（multipolygon / boundary / 少数异常值），闭合 way 该列为空，不能用它当要素类型；要素类型应由 osm_id 是否非空判定。",
     "面层有 15 个几何无效要素（LinearRing 点数不足）已剔除，读取时须用 on_invalid=\"ignore\"，否则 pyogrio 直接抛 GEOSException。",
     "osm_id 是字符串，跨表连接与去重必须按字符串处理。",
     "面层代表点用 point_on_surface 而非质心：凹多边形（如 L 形院区）的质心会落在多边形外。",

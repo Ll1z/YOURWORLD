@@ -8,7 +8,7 @@
 - 目标：以个人学习为目的，跑通「地理空间分析 Agent」的完整前沿技术栈
 - 不商业化、不做产品包装，重点是架构理解与可复现的工程实现
 - 首个可验收能力：自然语言提问 → 自动发现数据 → 写代码算空间关系 → 空间自检 → 出图出报告
-- 当前阶段：Stage 1 进行中。数据接入已完成（北京五区边界 + OSM 切片 + 数据卡片）；MCP Server 与 Agent 循环尚未编码。范围见 `HANDOFF.md`
+- 当前阶段：Stage 1 进行中。数据接入已完成（北京五区边界 + OSM 切片 + 数据卡片）；三个 MCP Server（geo_catalog / geo_compute / geo_knowledge）已实现并通过 stdio 冒烟测试；Agent 循环与空间自检器待做。范围见 `HANDOFF.md`
 
 ## 沟通约定
 
@@ -22,6 +22,7 @@
 - Python 3.12，用 `uv` 管理解释器与虚拟环境
 - 空间计算：DuckDB（spatial / FTS / vss 扩展）、GeoPandas、Shapely 2、pyogrio
 - MCP：官方 Python SDK `mcp` 2.x（`from mcp.server.mcpserver import MCPServer`；FastMCP 在 2.x 已更名为 MCPServer，`mcp.server.fastmcp` 路径会直接报错），先 stdio，稳定后 Streamable HTTP
+- MCP 客户端（实测坑）：用 `mcp.client.stdio.stdio_client` + `ClientSession`，**进入上下文后必须显式 `await session.initialize()`**，否则服务端对后续请求一律返回 `Invalid request parameters`；返回模型字段全是 snake_case（`server_info` / `protocol_version` / `resource_templates` / `structured_content`）。冒烟测试见 `scripts/mcp_smoke_test.py`
 - 检索：DuckDB FTS + VSS 单文件索引起步，本地 bge 系列模型做 embedding 与 rerank
 - 模型：DeepSeek API（OpenAI 兼容接口），密钥只放 `.env`
 - 观测：OpenTelemetry GenAI 语义约定 + Langfuse（Stage 2 起接入）
@@ -69,5 +70,8 @@ servers/ 下的包以可编辑模式安装（hatchling），全项目可直接�
 2. `scripts/build_poi.py` —— 从 OSM 切片抽取 POI 点层与面层，标注所属区
 3. `scripts/build_duckdb.py` —— 装载 DuckDB 并建立 R-tree 空间索引
 4. `scripts/ask_nearby.py` —— 端到端查询，产出 result.geojson / result.csv / query.sql / report.md
+5. `scripts/mcp_smoke_test.py` —— stdio 拉起三个 MCP Server，全量校验 tools / resources / resource templates 与工具调用
+
+查询口径只有一处实现：`servers/geo_compute/query.py`。MCP Tool `query_nearby` 与 `scripts/ask_nearby.py` 都调用它，禁止在别处重写 SQL。
 
 辅助脚本：`calibrate_gcj02.py`（纠偏算法校准）、`check_boundaries.py`（边界完整性体检）、`analyze_poi_overlap.py`（点面重复量化）

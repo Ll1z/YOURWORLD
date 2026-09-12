@@ -1,0 +1,38 @@
+{
+  "id": "coordinate-systems-scope",
+  "name": "坐标系与度量口径",
+  "version": "1.0",
+  "effective_from": "2026-09-12",
+  "storage_crs": {
+    "epsg": 4326,
+    "name": "WGS84",
+    "rule": "所有几何以 EPSG:4326 为唯一真身入库，不做多套坐标冗余存储"
+  },
+  "measurement": {
+    "area": {
+      "method": "geodesic",
+      "api": "pyproj.Geod(ellps='WGS84').geometry_area_perimeter",
+      "unit": "square_meter",
+      "reason": "椭球面精确，无投影变形，避免「面积该选哪个投影」的长期争议"
+    },
+    "distance": {
+      "crs": "EPSG:32650",
+      "name": "UTM 50N",
+      "central_meridian_deg": 117,
+      "unit": "meter",
+      "reason": "北京位于 114-120E 区间，中央经线 117E 覆盖，投影变形小；平面距离可走空间索引"
+    },
+    "buffer": {"crs": "EPSG:32650", "unit": "meter"}
+  },
+  "forbidden": [
+    "直接对经纬度做面积或距离运算",
+    "把 GCJ-02 或 BD-09 数据未经纠偏与其他 WGS84 数据混算",
+    "用投影面积替代大地线面积而不声明"
+  ],
+  "known_crs": {
+    "EPSG:4326": {"name": "WGS84", "offset_vs_wgs84_m": 0, "note": "OSM、天地图服务对齐"},
+    "EPSG:4490": {"name": "CGCS2000", "offset_vs_wgs84_m": 0.0, "note": "天地图声明坐标系，与 WGS84 差异在厘米级"},
+    "GCJ-02": {"name": "火星坐标系", "offset_vs_wgs84_m": 540, "note": "北京实测偏移约 东+540m 北+150m；DataV、高德、腾讯使用；纠偏见 geo_knowledge.coords.gcj02"},
+    "EPSG:32650": {"name": "UTM zone 50N", "note": "本项目距离与缓冲区计算坐标系"}
+  }
+}

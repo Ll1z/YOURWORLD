@@ -4,6 +4,11 @@
 - 点层与面层分开保存，口径由查询层决定，不在数据层做隐式合并
 - 每个 POI 一行，主分类按 PRIORITY 顺序取第一个命中的键，原始标签完整保留在 other_tags
 - 面层额外给出代表点（rep_x/rep_y）与大地线面积（area_m2），避免查询时重复计算
+
+身份口径（重要）：
+- GDAL 的 OSM multipolygons 层把要素 id 拆成两个互斥字段：来自 relation 的填 osm_id，
+  来自闭合 way 的填 osm_way_id。只读 osm_id 会丢掉绝大多数面要素的身份，必须 coalesce。
+- 主键是 (osm_type, osm_id) 组合：way 与 relation 的编号空间独立，同号不代表同一要素。
 """
 
 import re
@@ -45,14 +50,24 @@ def pick_category(tags):
     return None, None
 
 
-def build(tags_series, extra_df, osm_type):
+def polygon_identity(mp):
+    """把 multipolygons 层的 osm_id / osm_way_id 合并成 (要素类型, 要素 id) 两个数组。"""
+    is_relation = mp["osm_id"].notna()
+    ids = mp["osm_id"].where(is_relation, mp["osm_way_id"]).astype("int64").astype(str)
+    etype = np.where(is_relation.to_numpy(), "relation", "way").astype(object)
+    return etype, ids.to_numpy()
+
+
+def build(tags_series, extra_df, osm_type, osm_id=None):
+    """osm_type 为逐行数组；osm_id 省略时取 extra_df["osm_id"]。"""
     cats = tags_series.map(pick_category)
     keys = np.array([c[0] for c in cats], dtype=object)
     vals = np.array([c[1] for c in cats], dtype=object)
     keep = pd.notna(keys)
+    ids = extra_df["osm_id"] if osm_id is None else osm_id
     out = pd.DataFrame({
         "osm_type": osm_type,
-        "osm_id": extra_df["osm_id"].astype(str),
+        "osm_id": ids,
         "name": extra_df["name"],
         "category_key": keys,
         "category_value": vals,
@@ -69,7 +84,7 @@ for col in ("place", "man_made", "highway", "barrier"):
         for i, v in pts[col].items():
             if isinstance(v, str) and v:
                 pt_tags.at[i].setdefault(col, v)
-pt_df, pt_keep = build(pt_tags, pts, "node")
+pt_df, pt_keep = build(pt_tags, pts, np.full(len(pts), "node", dtype=object))
 print(f"  points 总数 {len(pts):,}，其中含 POI 标签 {pt_keep.sum():,}")
 pt_gdf = gpd.GeoDataFrame(pt_df[pt_keep].reset_index(drop=True),
                           geometry=pts.geometry[pt_keep].reset_index(drop=True), crs="EPSG:4326")
@@ -84,7 +99,8 @@ for col in ("amenity", "shop", "tourism", "office", "leisure", "craft", "histori
         for i, v in mp[col].items():
             if isinstance(v, str) and v:
                 mp_tags.at[i].setdefault(col, v)
-mp_df, mp_keep = build(mp_tags, mp, mp["type"].fillna("way").astype(str))
+mp_etype, mp_id = polygon_identity(mp)
+mp_df, mp_keep = build(mp_tags, mp, mp_etype, osm_id=mp_id)
 print(f"  multipolygons 总数 {len(mp):,}，其中含 POI 标签 {mp_keep.sum():,}")
 mp_gdf = gpd.GeoDataFrame(mp_df[mp_keep].reset_index(drop=True),
                           geometry=mp.geometry[mp_keep].reset_index(drop=True), crs="EPSG:4326")

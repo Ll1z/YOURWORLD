@@ -5,12 +5,18 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+dist/
+build/
+*.egg-info/
 
 # 敏感信息
 .env
 
 # 沙箱运行产物
 sandbox/run_*/
+
+# 本地临时调试产物（仓库根目录下划线前缀，不入库）
+/_*
 
 # 数据与索引（体积大、可重新下载，不入库）
 data/raw/

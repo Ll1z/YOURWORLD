@@ -2,58 +2,20 @@
 
 产出物固定包含数据来源、CRS 声明、计算方法、可复现 SQL 与结果文件，
 对应 HANDOFF.md 的 Stage 1 验收标准形态。
+
+查询核心复用 geo_compute.query，与 MCP Tool 共用同一份 SQL 与口径，避免两处定义漂移。
 """
 
 import argparse
-import json
 import os
 from datetime import datetime, timezone
 
-import duckdb
 import geopandas as gpd
-import numpy as np
 import shapely
-from pyproj import Transformer
 
-DB = r"data\processed\geo.duckdb"
-SCOPE = r"servers\geo_knowledge\poi_scope.json"
-T = Transformer.from_crs("EPSG:4326", "EPSG:32650", always_xy=True)
-DUP_M = 150.0
+from geo_compute import query
 
-DIST = "sqrt((x_utm - q.x) * (x_utm - q.x) + (y_utm - q.y) * (y_utm - q.y))"
-
-SQL = f"""
-WITH q AS (SELECT $qx AS x, $qy AS y)
-SELECT 'poi_point' AS layer, osm_id, name, category_key, category_value, district, lon, lat,
-       {DIST} AS dist_m, NULL::DOUBLE AS area_m2, ST_AsText(geom) AS wkt
-FROM poi_point, q
-WHERE {{D}}category_value IN ({{CAT}}) AND {DIST} <= $radius
-UNION ALL
-SELECT 'poi_area' AS layer, osm_id, name, category_key, category_value, district, lon, lat,
-       {DIST} AS dist_m, area_m2, ST_AsText(geom) AS wkt
-FROM poi_area, q
-WHERE {{D}}category_value IN ({{CAT}}) AND {DIST} <= $radius
-ORDER BY dist_m
-"""
-
-
-def find_duplicates(df):
-    """标记相距很近的点层/面层记录：可能描述同一设施，按口径不合并，仅提示。"""
-    if df.empty or df["layer"].nunique() < 2:
-        return []
-    px, py = T.transform(df["lon"].values, df["lat"].values)
-    is_pt = (df["layer"] == "poi_point").values
-    pt_idx, ag_idx = np.where(is_pt)[0], np.where(~is_pt)[0]
-    pg = shapely.points(px[pt_idx], py[pt_idx])
-    ag = shapely.points(px[ag_idx], py[ag_idx])
-    nn = shapely.STRtree(pg).nearest(ag)
-    dd = shapely.distance(pg[nn], ag)
-    out = []
-    for k, i in enumerate(ag_idx):
-        if dd[k] <= DUP_M:
-            out.append((str(df["name"].iloc[i] or "(无名)"),
-                        str(df["name"].iloc[pt_idx[nn[k]]] or "(无名)"), float(dd[k])))
-    return out
+DUP_M = query.DUP_M
 
 
 def main():
@@ -63,55 +25,36 @@ def main():
     ap.add_argument("--district", default=None, help="限定区名；省略则不限")
     ap.add_argument("--radius", type=float, default=1000.0, help="半径（米，直线距离）")
     ap.add_argument("--preset", default="medical", help="口径预设，见 poi_scope.json")
-    ap.add_argument("--outdir", default=r"data\processed\results")
+    ap.add_argument("--outdir", default=os.path.join("data", "processed", "results"))
     args = ap.parse_args()
 
-    scope = json.load(open(SCOPE, encoding="utf-8"))
-    cats = scope["category_matching"]["presets"].get(args.preset)
-    if not cats:
-        raise SystemExit(f"未知预设 {args.preset}，可用: {list(scope['category_matching']['presets'])}")
-
-    con = duckdb.connect(DB, read_only=True)
-    con.execute("LOAD spatial")
-
-    sql = SQL.replace("{CAT}", ",".join(f"'{c}'" for c in cats))
-    params = {"radius": args.radius}
-    if args.district:
-        sql = sql.replace("{D}", "district = $district AND ")
-        params["district"] = args.district
-    else:
-        sql = sql.replace("{D}", "")
+    scope = query.load_scope()
+    try:
+        cats = query.resolve_categories(args.preset)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
 
     if args.lon is None or args.lat is None:
         if not args.district:
             raise SystemExit("需给出 --lon/--lat，或给出 --district 以使用该区代表点作中心")
-        c = con.execute(
-            "SELECT ST_X(p) AS lon, ST_Y(p) AS lat FROM "
-            "(SELECT ST_PointOnSurface(geom) AS p FROM districts WHERE name = $district)",
-            {"district": args.district},
-        ).df().iloc[0]
-        lon, lat = float(c["lon"]), float(c["lat"])
+        lon, lat = query.district_point_on_surface(args.district)
         center_src = f"{args.district}边界的 point_on_surface（脚本自动选取）"
     else:
         lon, lat = args.lon, args.lat
         center_src = "命令行给定"
 
-    qx, qy = T.transform(lon, lat)
-    params["qx"], params["qy"] = qx, qy
-    df = con.execute(sql, params).df()
-    con.close()
+    df, sql, params = query.nearby(lon, lat, args.radius, args.district, args.preset)
 
-    df["dist_m"] = df["dist_m"].round(1)
-    df = df.sort_values("dist_m").reset_index(drop=True)
     gdf = gpd.GeoDataFrame(df.drop(columns=["wkt"]).copy(),
                            geometry=shapely.from_wkt(df["wkt"].values), crs="EPSG:4326")
+    suspect = query.find_duplicates(df)
 
-    suspect = find_duplicates(df)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = os.path.join(args.outdir, f"run_{ts}")
     os.makedirs(run_dir, exist_ok=True)
     gdf.to_file(os.path.join(run_dir, "result.geojson"), driver="GeoJSON")
-    gdf.drop(columns="geometry").to_csv(os.path.join(run_dir, "result.csv"), index=False, encoding="utf-8")
+    gdf.drop(columns="geometry").to_csv(os.path.join(run_dir, "result.csv"),
+                                        index=False, encoding="utf-8")
     with open(os.path.join(run_dir, "query.sql"), "w", encoding="utf-8") as f:
         f.write(sql + "\n\n-- 绑定参数:\n")
         for k, v in params.items():
@@ -143,6 +86,7 @@ def main():
     lines.append("- 边界数据：cn-bj-adm5-wgs84（东城/朝阳/丰台/海淀 取自 OSM，西城区由 DataV 边界经 GCJ-02 纠偏补齐）")
     lines.append("- 数据卡片：servers/geo_catalog/cards/")
     lines.append(f"- 口径定义：servers/geo_knowledge/poi_scope.json（版本 {scope['version']}）")
+    lines.append("- 查询实现：servers/geo_compute/query.py（与 MCP Tool query_nearby 同一份 SQL）")
     lines.append("")
     lines.append("## CRS 与单位声明")
     lines.append("")
@@ -156,7 +100,7 @@ def main():
     lines.append("1. 中心点由 EPSG:4326 经 pyproj 投影到 EPSG:32650")
     lines.append("2. 在 poi_point 与 poi_area 两表中分别按 district 与 category_value 过滤")
     lines.append(f"3. 用平面欧氏距离筛出 <= {args.radius:.0f} m 的记录")
-    lines.append("4. 两层结果取并集，按 osm_id 唯一标识，不做几何去重（理由见口径文件）")
+    lines.append("4. 两层结果取并集，以 (osm_type, osm_id) 唯一标识，不做几何去重（理由见口径文件）")
     lines.append("5. 面层以其 point_on_surface 代表点参与距离计算")
     lines.append("6. 结果按距离升序")
     lines.append("")
@@ -167,13 +111,15 @@ def main():
     lines.append("| 距离(m) | 层 | 名称 | 类别 | 所属区 |")
     lines.append("|---|---|---|---|---|")
     for _, r in top.iterrows():
-        lines.append(f"| {r['dist_m']:.0f} | {r['layer']} | {r['name'] or '(无名)'} | {r['category_value']} | {r['district']} |")
+        lines.append(f"| {r['dist_m']:.0f} | {r['layer']} | {r['name'] or '(无名)'} | "
+                     f"{r['category_value']} | {r['district']} |")
     if len(df) > len(top):
         lines.append("")
         lines.append(f"（仅列出最近 {len(top)} 个，完整结果见 result.csv）")
-    stat = "、".join(f"{k} {v}" for k, v in df["category_value"].value_counts().items())
-    lines.append("")
-    lines.append(f"按类别统计：{stat}")
+    if len(df):
+        stat = "、".join(f"{k} {v}" for k, v in df["category_value"].value_counts().items())
+        lines.append("")
+        lines.append(f"按类别统计：{stat}")
     lines.append("")
     lines.append("## 疑似重复（点面双挂）")
     lines.append("")
@@ -181,14 +127,15 @@ def main():
         lines.append(f"以下点层与面层记录相距 <= {DUP_M:.0f} m，可能描述同一设施。"
                      f"按口径保留两条不合并，但计数时需注意：")
         lines.append("")
-        lines.append("| 面层名称 | 点层名称 | 相距(m) |")
-        lines.append("|---|---|---|")
-        for a, b, d in suspect:
-            lines.append(f"| {a} | {b} | {d:.0f} |")
+        lines.append("| 面层名称 | 面层 id | 点层名称 | 点层 id | 相距(m) |")
+        lines.append("|---|---|---|---|---|")
+        for d in suspect:
+            lines.append(f"| {d['area_name'] or '(无名)'} | {d['area_osm_id']} | "
+                         f"{d['point_name'] or '(无名)'} | {d['point_osm_id']} | {d['gap_m']:.0f} |")
         lines.append("")
         lines.append(f"共 {len(suspect)} 对。若本次查询目的是「计数」，建议口径改为去重后再计数。")
     else:
-        lines.append("本次结果中未发现距离 <= 150 m 的点面配对。")
+        lines.append(f"本次结果中未发现距离 <= {DUP_M:.0f} m 的点面配对。")
     lines.append("")
     lines.append("## 产物")
     lines.append("")
