@@ -159,8 +159,9 @@ def check_magnitude(result: dict) -> Check:
             problems.append(f"count_returned={returned} 超过 count_total={total}")
     elif total != len(hits):
         problems.append(f"count_total={total} 与 hits 实际长度 {len(hits)} 不一致")
-    if result.get("count_point", 0) + result.get("count_area", 0) != total:
-        problems.append("点层计数 + 面层计数 != 总数")
+    if (result.get("count_point", 0) + result.get("count_area", 0)
+            + result.get("count_anchor", 0)) != total:
+        problems.append("点层计数 + 面层计数 + anchor 层计数 != 总数")
 
     expected_point = result.get("returned_point", result.get("count_point"))
     expected_area = result.get("returned_area", result.get("count_area"))
@@ -168,6 +169,10 @@ def check_magnitude(result: dict) -> Check:
         problems.append("返回的点层条数与 hits 中点层条数不符")
     if expected_area != sum(1 for h in hits if h["layer"] == "poi_area"):
         problems.append("返回的面层条数与 hits 中面层条数不符")
+
+    expected_anchor = result.get("returned_anchor") or result.get("count_anchor") or 0
+    if expected_anchor != sum(1 for h in hits if h["layer"] == "anchor"):
+        problems.append("返回的 anchor 层条数与 hits 中 anchor 条数不符")
 
     keys = [(h["layer"], h["osm_id"]) for h in hits]
     if len(keys) != len(set(keys)):

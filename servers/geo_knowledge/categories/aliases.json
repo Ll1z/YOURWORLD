@@ -9,7 +9,8 @@
     "调用 query_nearby / summarize_poi 时，categories 可以直接写这里的中文说法（如「高校」），也可以写 OSM 值（university）或 key=value（amenity=university）。",
     "一个中文说法可能对应多个 OSM 值：『高校』在 OSM 里拆成 amenity=university 与 amenity=college 两个值，只查其中一个会漏掉一半。",
     "别名由服务端展开，模型不需要自己猜 OSM 标签；对不上号的类别会直接报错并给出近似建议，不会静默返回 0 条。",
-    "这里没有的说法不等于库里没有：全库 469 个 (category_key, category_value) 组合的完整清单见 compute://categories。"
+    "这里没有的说法不等于库里没有：全库 469 个 (category_key, category_value) 组合的完整清单见 compute://categories。",
+    "标了 layer=anchor 的别名（地铁站、公交站点等）只在 anchor 层：query_nearby 默认不查这一层，要查就传 include_anchor=true，命中单独计在 count_anchor。"
   ],
 
   "aliases": {
@@ -58,7 +59,7 @@
     "公园": {"categories": ["leisure=park"]},
     "花园": {"categories": ["leisure=garden"]},
     "自然保护区": {"categories": ["leisure=nature_reserve"]},
-    "广场": {"categories": ["leisure=common"], "note": "OSM 没有「广场」这一类，最接近的是 leisure=common（公共空地）；place=square 只在 anchor 层，不参与 POI 检索"},
+    "广场": {"categories": ["leisure=common"], "note": "OSM 没有「广场」这一类，最接近的是 leisure=common（公共空地）；place=square 只在 anchor 层，要 include_anchor=true 才查得到"},
     "体育场": {"categories": ["leisure=stadium", "leisure=sports_centre"]},
     "体育馆": {"categories": ["leisure=sports_centre", "leisure=sports_hall"]},
     "健身房": {"categories": ["leisure=fitness_centre"]},
@@ -89,16 +90,17 @@
     "纪念馆": {"categories": ["historic=memorial"]},
     "古迹": {"categories": ["historic=monument", "historic=archaeological_site", "historic=castle", "historic=ruins"]},
     "历史建筑": {"categories": ["historic=building", "historic=heritage_building"]},
-    "公交站": {"categories": ["amenity=bus_station"], "note": "只有 amenity=bus_station（枢纽站）；路边的 highway=bus_stop 在 anchor 层，不参与半径查询"},
+    "公交站": {"categories": ["amenity=bus_station"], "note": "只有 amenity=bus_station（枢纽站）；路边的公交站牌在 anchor 层，见「公交站点」"},
+    "公交站点": {"categories": ["highway=bus_stop"], "layer": "anchor", "note": "路边的公交站牌，全库 21425 条；只在 anchor 层，query_nearby 要传 include_anchor=true"},
+    "地铁站": {"categories": ["railway=station"], "layer": "anchor", "note": "OSM 只用 railway=station 一个值，不区分地铁站与火车站，库里 575 条两者混在一起；public_transport=station（49 条）多为长途与机场巴士站，为避免重复计数不合并"},
+    "地铁口": {"categories": ["railway=subway_entrance"], "layer": "anchor", "note": "地铁出入口，全库 367 条；一个站往往多个口，数量多于地铁站本身"},
+    "火车站": {"categories": ["railway=station"], "layer": "anchor", "note": "与地铁站同为 railway=station，标签不区分两者，不要据此下「有 N 座火车站」的结论"},
     "公园长椅": {"categories": ["amenity=bench"]},
     "饮水点": {"categories": ["amenity=drinking_water", "amenity=water_point"]},
     "避难场所": {"categories": ["amenity=shelter"]}
   },
 
   "not_available": {
-    "地铁站": "地铁站在 anchor 层（railway=station）只用于定位，不参与半径设施检索：query_nearby 只覆盖 poi_point 与 poi_area 两层，railway 标签不在其中",
-    "地铁口": "同上：地铁相关对象只在 anchor 层，不在 poi_point / poi_area",
-    "火车站": "火车站只在 anchor 层（railway=station），POI 两层里没有 railway 标签的设施",
     "公交线路": "库中没有公交线路数据，只有公交站与地铁站这两类点位",
     "人口": "库中只有行政边界面积与 POI，没有人口、经济等统计数据"
   },
@@ -106,6 +108,7 @@
   "known_limitations": [
     "别名是人工维护的映射，只覆盖常见问法；库里的 469 个类别组合不需要别名也能直接查（compute://categories）。",
     "中文别名与 OSM 值的对应关系按中国大陆语境整理，不代表 OSM 官方分类。",
-    "同一个 OSM 值可能出现在不同 key 下（如 university 在 amenity 与 office 下），别名要么显式写 key=value，要么用裸值表示不限 key。"
+    "同一个 OSM 值可能出现在不同 key 下（如 university 在 amenity 与 office 下），别名要么显式写 key=value，要么用裸值表示不限 key。",
+    "layer=anchor 的别名只有 query_nearby(include_anchor=true) 查得到；summarize_poi 只统计 POI 两层，拿它统计地铁站数量会得到 0。"
   ]
 }

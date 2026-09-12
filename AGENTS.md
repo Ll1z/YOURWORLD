@@ -40,11 +40,12 @@
 - 数值结论（面积、距离、数量、排名）必须由代码算出，LLM 不得直接生成数字
 - 任何空间运算先显式声明 CRS；禁止拿经纬度直接算几何量。面积一律用大地线面积（`pyproj.Geod.geometry_area_perimeter`，椭球面精确、无投影变形）；距离与缓冲区用 UTM 50N（EPSG:32650，中央经线 117°E 覆盖北京）
 - 半径查询必须先有明确、可命名的中心，和路径规划要先选起点同理：中心要么由调用方给坐标，要么由 `find_places` 解析地名得到。**禁止拿行政区几何代表点（point_on_surface）当圆心**——海淀区实测，以几何代表点为圆心问「800 米内有哪些便利店」会得到 0 个，那是几何产物不是事实。口径见 `servers/geo_knowledge/anchor_scope.json`
-- 类别查询不设默认类别：`query_nearby` / `summarize_poi` 的类别必须由调用方给定，认不出来就报错并给近似建议，**绝不返回 0 条**（0 条要留给「真的没有」）。可查类别是库内真实存在的 `(category_key, category_value)` 组合（469 个，见 `compute://categories`），中文说法（高校 / 药店 / 公园…）在 `servers/geo_knowledge/categories/aliases.json`，由 `query.expand_category` 单点展开——默认值会把「想查 A 却拿到 B」变成静默替换
+- 类别查询不设默认类别：`query_nearby` / `summarize_poi` 的类别必须由调用方给定，认不出来就报错并给近似建议，**绝不返回 0 条**（0 条要留给「真的没有」）。可查类别是库内真实存在的 `(category_key, category_value)` 组合（469 个，见 `compute://categories`），中文说法（高校 / 药店 / 公园…）在 `servers/geo_knowledge/categories/aliases.json`，由 `query.expand_category` 单点展开——默认值会把「想查 A 却拿到 B」变成静默替换。另有 15 个只存在于 anchor 层的组合（`railway=station` 等）单列在 `compute://categories` 的 `anchor_layer_only` 里
 - 每个数据集必须配一张数据卡片（dataset card），字段规范见 `HANDOFF.md`
 - MCP 分工：Resource 承载上下文（数据卡、schema、字典），Tool 承载动作与计算，不把一切都做成 Tool
 - 工具返回的明细必须有上限：计数保持完整、明细按距离取前 N 条，并显式标注 `hits_truncated`。模型够不着的明细等于不存在——实测一次 10 公里半径的高校查询命中 158 条、37920 字符，回喂时被截到 20000，模型拿不到全量反而跑去沙箱里折腾了好几步
 - 空间对象查询走空间索引（R-tree / H3 网格），不用向量检索做空间过滤
+- 图层的口径边界必须显式：`anchor` 层（地铁站、火车站、公交站、地名锚点）默认不参与半径查询——它回答「在哪」，POI 两层回答「有什么」。查站点类设施才传 `query_nearby(include_anchor=true)`，命中单独计在 `count_anchor`，不并进默认口径；类别只在 anchor 层时默认查询直接报错并指出这个开关，不给一个会被当成结论的 0 条
 - 知识检索只有一套口径：`search_knowledge` / `search_datasets` 走混合检索，索引缺失时直接报错，**不得静默退回关键词匹配**——换一种检索方式就是换了一套口径
 - Agent 生成的代码一律在 `sandbox/run_<id>/` 内以受限子进程执行：禁网、超时（默认 30 秒）、内存上限（默认 1024 MB）、数据只读、只许写运行目录。`run_python` 是它的对外入口，也是唯一入口——不要在别处起子进程跑 Agent 写的代码
 - 能用现成工具回答的，不许用 `run_python` 绕过去：工具的口径全项目唯一，脚本里的口径是临时的

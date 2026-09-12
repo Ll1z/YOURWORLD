@@ -209,7 +209,7 @@
 - Agent：裸循环（`agent/loop.py`）+ 五项空间自检器（CRS / 单位 / 几何有效性 / 量级自洽 / 数值溯源），溯源不通过会把回答打回重写
 - Web：`web/` 的 FastAPI 薄壳 + Cesium 前端已消费 `visual_hints.json`，可飞相机、标命中、画半径圈与两点连线；中心点候选在界面与地图两处都能点选
 - 沙箱与 CodeAct：`geo_compute/sandbox.py`（L1 受限子进程，后端可替换）+ `run_python` 工具 + `scripts/sandbox_smoke_test.py`（11 条护栏验收）；Agent 提示词加了「工具优先、现成工具拼不出来才写代码」「照 traceback 改、同一个错两次就停」两条
-- 评测：`eval/` 评测集 43 题（nearby 19 / aggregate 11 / distance 6 / places 3 / refusal 2 / tool_error 2），期望值由真实工具生成后冻结；`--mode data` 零 token 回归，`--mode agent` 判工具选择、数值溯源、关键数字与拒答行为
+- 评测：`eval/` 评测集 44 题（nearby 20 / aggregate 11 / distance 6 / places 3 / tool_error 2 / refusal 2），期望值由真实工具生成后冻结；`--mode data` 零 token 回归（42/42），`--mode agent` 判工具选择、数值溯源、关键数字与拒答行为
 
 ### 与「明确不做」的差异
 
@@ -239,6 +239,16 @@
 - 自检器跟着改：截断时校验 `count_returned` 与实际条数、确认 `returned_*` 不超过 `count_*`；没截断时才校验 `count_total`。少查一项，「截断」就成了数字对不上的借口
 - 提示词加一句：结果被截断时正确做法是调大 limit 重查，不是用 run_python 去把全量明细捞出来
 - 评测：`project()` 只冻结计数与前三条最近设施，所以口径没变；重跑 `build_eval.py` 后 `ground_truth.json` 只有 fingerprint 两行变化，`--mode data` 仍是 41/41
+
+### ⑤-2 anchor 层纳入半径查询（技术债）
+
+- 问题：`anchor` 层（地铁站、火车站、公交站、地名锚点）此前完全不参与半径查询，问「附近有哪些地铁站」只能答「不在可查询范围」。数据早就到了，是能力没跟上——库里 31119 条 anchor 记录一直只在 `find_places` 里当查询中心用
+- 改法：`query.nearby(include_anchor=...)` 在 POI 两层之外再 UNION ALL 一段 anchor 查询，`query_nearby` 加同名布尔参数。**默认不查是刻意的**：anchor 回答「在哪」，POI 回答「有什么」，把 21425 个公交站牌和 3827 个村庄并进「附近有多少家便利店」，结果会凭空多出几百个地名节点
+- 口径不静默扩大：命中按层分开计（新增 `count_anchor` / `returned_anchor`，`count_total` 仍是三层之和）；类别只在 anchor 层时（如 `railway=station`）默认查询直接报错并指出要开 `include_anchor`，不给「0 条」这个会被当成结论的答案
+- 别名表跟着改：`地铁站` / `地铁口` / `火车站` / `公交站点` 从 `not_available` 移进 `aliases`（标 `layer=anchor`）；口径文件、经验条目、提示词第 11 条、知识库与数据目录里的「地铁站查不到」全部改写。另发现 `public_transport=station`（49 条）在本库里多是长途与机场巴士站，与 `railway=station` 同名重叠只有 2 对，按「不静默合并」原则不并进地铁站
+- 顺带补一处数据缺口：`anchor` 表此前没有 `x_utm` / `y_utm` 派生列（`poi_point` / `poi_area` 都有），半径计算没法复用同一段 SQL。已补列 + 建索引，`scripts/build_duckdb.py` 同步改，重建数据库不会丢
+- `find_duplicates` 只认 `poi_area` 作面层：否则 anchor 行会被当成「面」，凭空造出一堆并不存在的点面双挂
+- 评测：新增 nearby-019（苏州街 1 公里内的地铁站，须带 `include_anchor=true`）与 nearby-022（不带参数时必须报「只在 anchor 层」），题库 43 → 44 题；重跑 `build_eval.py`，`--mode data` 42/42，`mcp_smoke_test.py` 0 失败，`sandbox_smoke_test.py` 11/11
 
 ### ④-3 多 Agent（规划者 / 执行者 / 复核者）
 

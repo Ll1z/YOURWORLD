@@ -34,7 +34,7 @@
     "layer_roles": {
       "poi_point": "点状 POI（OSM node），回答「这里有什么设施」",
       "poi_area": "面状 POI（OSM way/relation），与点层互为补充，同样回答「有什么设施」",
-      "anchor": "定位锚点：带名称的地名与车站，回答「这个地方叫什么、在哪」，供半径查询选中心用"
+      "anchor": "定位锚点：带名称的地名与车站，回答「这个地方叫什么、在哪」，供半径查询选中心用；默认不参与半径设施查询，要查站点类设施得给 query_nearby 传 include_anchor=true"
     }
   },
   "schema": {
@@ -105,6 +105,7 @@
     "POI 名称缺失率不低，按名称聚合不可靠。",
     "数据完整性取决于 OSM 志愿者，结论须表述为「OSM 数据显示」。",
     "POI 层的 PRIORITY 不含 place / railway / highway，因此「中关村」这类地名节点与地铁站、公交站会被 POI 层整体丢掉。这正是锚点层单独存在的理由：POI 层答「有什么」，锚点层答「在哪」。",
-    "锚点只取点层。线状站台与面状地名不在锚点层内；用车站名定位时优先命中 node 级的 station / subway_entrance。"
+    "锚点只取点层。线状站台与面状地名不在锚点层内；用车站名定位时优先命中 node 级的 station / subway_entrance。",
+    "锚点层默认不参与半径设施查询：地铁站、火车站、公交站这类对象要传 query_nearby(include_anchor=true) 才查得到，命中单独计在 count_anchor，不并进 POI 两层的数。另外 OSM 的 railway=station 不区分地铁站与火车站，库里 575 条两者混在一起。"
   ]
 }

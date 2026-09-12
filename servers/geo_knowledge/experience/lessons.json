@@ -56,11 +56,11 @@
    "last_seen": "2026-09-12"
   },
   {
-   "signature": "manual:anchor-not-searchable",
+   "signature": "manual:anchor-layer-opt-in",
    "kind": "scope",
-   "statement": "被问「附近有哪些地铁站」时如实说没有数据支持：地铁站、火车站在 anchor 层，只用于定位，不参与半径设施检索",
-   "why": "query_nearby 只覆盖 poi_point 与 poi_area 两层，railway 标签不在这两层里。拿别的类别代替就是答非所问。",
-   "evidence": "实测报错「地铁站 不在可查询范围内」；口径见 servers/geo_knowledge/anchor_scope.json",
+   "statement": "问「附近有哪些地铁站」时给 query_nearby 传 include_anchor=true：地铁站、火车站在 anchor 层，默认口径不查这一层。忘了传会报「只在 anchor 层」，补上参数即可，不要拿别的类别代替，也不要把默认口径的 0 当成结论。",
+   "why": "query_nearby 默认只覆盖 poi_point 与 poi_area 两层，railway 标签不在这两层里。anchor 回答「在哪」而不是「有什么」，静默并进设施统计会凭空多出几百个地名节点，所以要显式开、分开计数。",
+   "evidence": "未传 include_anchor 时实测报错「railway=station 只在 anchor 层（定位锚点），默认的半径查询只覆盖 poi_point / poi_area 两层」；传 true 后正常返回 count_anchor；口径见 servers/geo_knowledge/anchor_scope.json",
    "sources": [
     "servers/geo_knowledge/anchor_scope.json",
     "servers/geo_compute/query.py"

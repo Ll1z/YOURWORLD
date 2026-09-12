@@ -52,7 +52,7 @@ def get_scope(scope_id: str) -> dict:
 
 
 @mcp.resource("knowledge://categories/aliases", name="category-aliases",
-              description="POI 类别的中文别名表，以及库中查不到的类别（如地铁站）及原因")
+              description="POI 类别的中文别名表（含只在 anchor 层的别名），以及库中确实没有的类别及原因")
 def get_category_aliases() -> dict:
     """中文说法 → OSM 类别的映射，由 geo_compute 在解析 categories 参数时展开。
 

@@ -99,7 +99,7 @@ def search_knowledge(query: str, limit: int = 5, kinds: list[str] | None = None,
                      dataset_id: str | None = None) -> dict:
     """检索知识库：数据卡、口径文件、类别中文别名、坐标系定义。
 
-    用于回答「口径是怎么定的」「地铁站为什么查不到」「这个中文说法对应哪个 OSM 标签」
+    用于回答「口径是怎么定的」「地铁站为什么要 include_anchor」「这个中文说法对应哪个 OSM 标签」
     「坐标系有哪些坑」这类问题。命中项带 source_uri，要看全文就按它读对应 Resource。
     kinds 可按语料类型过滤：dataset_card / dataset_schema / dataset_pitfall /
     scope / scope_section / alias / alias_unavailable / experience（已确认的经验条目）；

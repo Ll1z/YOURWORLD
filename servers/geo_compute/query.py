@@ -13,6 +13,11 @@
     预设只是常用组合的快捷方式。因此类别参数一律不给默认值——有默认值就会出现
     「想查高校、拿到医院」这种无从察觉的替换，宁可直接报错。中文说法（「高校」）
     由 geo_knowledge/categories/aliases.json 展开成 OSM 值，展开处只有这一份实现。
+
+图层口径（重要）：
+    anchor 层（地铁站、火车站、公交站、地名等定位锚点）默认不参与半径查询——它回答
+    「这个地方叫什么、在哪」，不回答「这里有什么设施」，混进设施统计会凭空多出几百个
+    地名节点。要查就显式传 include_anchor=True，并且分层计数，不把两层的数混成一个。
 """
 
 from __future__ import annotations
@@ -66,6 +71,19 @@ FROM poi_area, q
 WHERE {{D}}{{CAT}} AND {_DIST} <= $radius
 ORDER BY dist_m
 """
+
+# anchor 层的半径查询：只有调用方明确要求查站点类设施时才拼上这一段。
+# 默认不查是刻意的——anchor 层是「定位锚点」（地名、站点、路口），把它混进设施统计会
+# 让「附近有多少家便利店」这类问题悄悄多出几百个地名节点。要查就明说，并且分开计数。
+_ANCHOR_UNION = f"""
+UNION ALL
+SELECT 'anchor' AS layer, osm_id, name, category_key, category_value, district, lon, lat,
+       {_DIST} AS dist_m, NULL::DOUBLE AS area_m2, ST_AsText(geom) AS wkt
+FROM anchor, q
+WHERE {{D}}{{CAT}} AND {_DIST} <= $radius
+"""
+
+NEARBY_SQL_ANCHOR = NEARBY_SQL.replace("ORDER BY dist_m", _ANCHOR_UNION + "ORDER BY dist_m")
 
 SUMMARY_SQL = """
 SELECT district, category_key, category_value, count(*) AS n FROM (
@@ -162,17 +180,55 @@ def category_inventory() -> pd.DataFrame:
     return _CACHE["inventory"]  # type: ignore[return-value]
 
 
+def anchor_inventory() -> pd.DataFrame:
+    """anchor 层的 (category_key, category_value) 与计数，进程内只查一次。
+
+    单独一份是刻意的：compute://categories 与 summarize_poi 的口径都是 POI 两层，
+    把 anchor 混进去会让「可查类别」看起来比实际宽——railway=station 这类值只在
+    query_nearby(include_anchor=True) 里查得到。它的用处是让类别校验认识这些值，
+    并把「这项只在 anchor 层」明确报给调用方，而不是静默返回一个 0。
+    """
+    if "anchor_inventory" not in _CACHE:
+        con = connect()
+        try:
+            df = con.execute("""
+                SELECT category_key, category_value, count(*) AS n
+                FROM anchor GROUP BY 1, 2 ORDER BY n DESC, category_key, category_value
+            """).df()
+        finally:
+            con.close()
+        _CACHE["anchor_inventory"] = df
+    return _CACHE["anchor_inventory"]  # type: ignore[return-value]
+
+
 def _known_keys() -> list[str]:
-    return sorted(set(category_inventory()["category_key"]))
+    return sorted(set(category_inventory()["category_key"])
+                  | set(anchor_inventory()["category_key"]))
 
 
 def _values_of_key(key: str) -> list[str]:
-    inv = category_inventory()
-    return sorted(inv.loc[inv["category_key"] == key, "category_value"])
+    out: set[str] = set()
+    for inv in (category_inventory(), anchor_inventory()):
+        out |= set(inv.loc[inv["category_key"] == key, "category_value"])
+    return sorted(out)
 
 
 def _known_values() -> set[str]:
-    return set(category_inventory()["category_value"])
+    return (set(category_inventory()["category_value"])
+            | set(anchor_inventory()["category_value"]))
+
+
+def missing_from_poi(specs: list[CategorySpec]) -> list[CategorySpec]:
+    """筛出「POI 两层里一条都没有」的类别口径，典型是只在 anchor 层的 railway=station。
+
+    这类口径在默认的半径查询里必然得到 0，而这个 0 不是「附近没有」，是「查错层了」。
+    调用方据此提示 include_anchor=True——两个意思不能混成同一个 0。
+    """
+    inv = category_inventory()
+    pairs = set(zip(inv["category_key"], inv["category_value"]))
+    values = set(inv["category_value"])
+    return [s for s in specs
+            if not ((s.key, s.value) in pairs if s.key else s.value in values)]
 
 
 def _parse_osm_tag(text: str) -> CategorySpec:
@@ -329,15 +385,18 @@ def plain(record: dict) -> dict:
 
 def nearby(lon: float, lat: float, radius_m: float = 1000.0,
            district: str | None = None,
-           categories: list[CategorySpec] | None = None):
+           categories: list[CategorySpec] | None = None,
+           include_anchor: bool = False):
     """返回 (结果 DataFrame, 实际执行 SQL, 绑定参数)。中心必须由调用方给定。
 
     categories 是 resolve_categories 的产物；本函数不认识 preset，也没有默认类别。
+    include_anchor=True 时把 anchor 层（地名、地铁站、火车站、公交站等锚点）也纳入半径查询；
+    默认 False，层与层的计数必须分开，不能混成一个数。
     """
     pred, cat_params = category_predicate(list(categories or []))
     con = connect()
     try:
-        sql = NEARBY_SQL.replace("{CAT}", pred)
+        sql = (NEARBY_SQL_ANCHOR if include_anchor else NEARBY_SQL).replace("{CAT}", pred)
         params = {"radius": float(radius_m), **cat_params}
         if district:
             sql = sql.replace("{D}", "district = $district AND ")
@@ -410,12 +469,19 @@ def distance_between(a: dict, b: dict) -> dict:
 
 
 def find_duplicates(df: pd.DataFrame) -> list[dict]:
-    """标记结果内相距 <= DUP_M 的点面配对：疑似同一设施被点面双挂。只提示不合并。"""
-    if df.empty or df["layer"].nunique() < 2:
+    """标记结果内相距 <= DUP_M 的点面配对：疑似同一设施被点面双挂。只提示不合并。
+
+    只认 poi_area 作面层：调用了 include_anchor 时结果里还有 anchor 行，
+    把它们当成「面」会凭空造出一堆不存在的点面双挂。
+    """
+    if df.empty:
         return []
     px, py = TO_UTM.transform(df["lon"].values, df["lat"].values)
     is_pt = (df["layer"] == "poi_point").values
-    pt_idx, ag_idx = np.where(is_pt)[0], np.where(~is_pt)[0]
+    is_area = (df["layer"] == "poi_area").values
+    pt_idx, ag_idx = np.where(is_pt)[0], np.where(is_area)[0]
+    if len(pt_idx) == 0 or len(ag_idx) == 0:
+        return []
     pg = shapely.points(px[pt_idx], py[pt_idx])
     nn = shapely.STRtree(pg).nearest(shapely.points(px[ag_idx], py[ag_idx]))
     dd = shapely.distance(pg[nn], shapely.points(px[ag_idx], py[ag_idx]))

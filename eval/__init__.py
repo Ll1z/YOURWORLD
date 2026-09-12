@@ -69,6 +69,7 @@ def project(tool: str, payload) -> dict:
             "count_total": data["count_total"],
             "count_point": data["count_point"],
             "count_area": data["count_area"],
+            "count_anchor": data.get("count_anchor", 0),
             "categories": {c["label"]: c["count"] for c in data["categories"]},
             "nearest": [[h.get("name") or "", round(h["dist_m"], 1)] for h in data["hits"][:3]],
         })

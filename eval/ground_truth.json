@@ -1,13 +1,13 @@
 {
  "version": "1.0",
- "generated": "20260912T113728Z",
+ "generated": "20260912T114454Z",
  "generator": "scripts/build_eval.py",
  "fingerprint": {
-  "servers/geo_compute/query.py": "d322eedeaad9d12e",
-  "servers/geo_compute/server.py": "ed988c1734f5b65e",
-  "servers/geo_knowledge/poi_scope.json": "31979b2d1db094c8",
-  "servers/geo_knowledge/categories/aliases.json": "8f3b01c32cc321f8",
-  "data/processed/geo.duckdb": "19673088:1789205069"
+  "servers/geo_compute/query.py": "1432ee402538977c",
+  "servers/geo_compute/server.py": "095fb71bfe42f9ec",
+  "servers/geo_knowledge/poi_scope.json": "a9ce3393785bd1f0",
+  "servers/geo_knowledge/categories/aliases.json": "79ce71a095c9c99a",
+  "data/processed/geo.duckdb": "21770240:1789213452"
  },
  "cases": {
   "nearby-001": {
@@ -36,6 +36,7 @@
     "count_total": 7,
     "count_point": 7,
     "count_area": 0,
+    "count_anchor": 0,
     "categories": {
      "shop=convenience": 3,
      "shop=supermarket": 4
@@ -81,6 +82,7 @@
     "count_total": 158,
     "count_point": 39,
     "count_area": 119,
+    "count_anchor": 0,
     "categories": {
      "amenity=university": 90,
      "amenity=college": 68
@@ -126,6 +128,7 @@
     "count_total": 6,
     "count_point": 3,
     "count_area": 3,
+    "count_anchor": 0,
     "categories": {
      "amenity=university": 2,
      "amenity=college": 4
@@ -171,6 +174,7 @@
     "count_total": 4,
     "count_point": 0,
     "count_area": 4,
+    "count_anchor": 0,
     "categories": {
      "amenity=hospital": 4
     },
@@ -215,6 +219,7 @@
     "count_total": 16,
     "count_point": 16,
     "count_area": 0,
+    "count_anchor": 0,
     "categories": {
      "amenity=bank": 16
     },
@@ -259,6 +264,7 @@
     "count_total": 67,
     "count_point": 1,
     "count_area": 66,
+    "count_anchor": 0,
     "categories": {
      "leisure=park": 67
     },
@@ -303,6 +309,7 @@
     "count_total": 5,
     "count_point": 0,
     "count_area": 5,
+    "count_anchor": 0,
     "categories": {
      "amenity=fuel": 5
     },
@@ -347,6 +354,7 @@
     "count_total": 42,
     "count_point": 42,
     "count_area": 0,
+    "count_anchor": 0,
     "categories": {
      "amenity=cafe": 42
     },
@@ -391,6 +399,7 @@
     "count_total": 5,
     "count_point": 0,
     "count_area": 5,
+    "count_anchor": 0,
     "categories": {
      "amenity=kindergarten": 5
     },
@@ -435,6 +444,7 @@
     "count_total": 5,
     "count_point": 3,
     "count_area": 2,
+    "count_anchor": 0,
     "categories": {
      "tourism=museum": 5
     },
@@ -479,6 +489,7 @@
     "count_total": 0,
     "count_point": 0,
     "count_area": 0,
+    "count_anchor": 0,
     "categories": {
      "amenity=fuel": 0
     },
@@ -510,6 +521,7 @@
     "count_total": 1,
     "count_point": 0,
     "count_area": 1,
+    "count_anchor": 0,
     "categories": {
      "leisure=fitness_centre": 1
     },
@@ -546,6 +558,7 @@
     "count_total": 84,
     "count_point": 62,
     "count_area": 22,
+    "count_anchor": 0,
     "categories": {
      "tourism=hotel": 77,
      "tourism=guest_house": 2,
@@ -593,6 +606,7 @@
     "count_total": 58,
     "count_point": 51,
     "count_area": 7,
+    "count_anchor": 0,
     "categories": {
      "amenity=restaurant": 58
     },
@@ -638,6 +652,7 @@
     "count_total": 2,
     "count_point": 0,
     "count_area": 2,
+    "count_anchor": 0,
     "categories": {
      "amenity=university": 1,
      "amenity=college": 1
@@ -679,6 +694,7 @@
     "count_total": 6,
     "count_point": 1,
     "count_area": 5,
+    "count_anchor": 0,
     "categories": {
      "amenity=university": 6
     },
@@ -723,6 +739,7 @@
     "count_total": 234,
     "count_point": 96,
     "count_area": 138,
+    "count_anchor": 0,
     "categories": {
      "amenity=research_institute": 104,
      "office=research": 130
@@ -768,6 +785,7 @@
     "count_total": 2,
     "count_point": 2,
     "count_area": 0,
+    "count_anchor": 0,
     "categories": {
      "amenity=charging_station": 2
     },
@@ -784,6 +802,48 @@
    }
   },
   "nearby-019": {
+   "kind": "nearby",
+   "tool": "query_nearby",
+   "args": {
+    "radius_m": 1000,
+    "categories": [
+     "地铁站"
+    ],
+    "include_anchor": true,
+    "lon": 116.2999736,
+    "lat": 39.9743281
+   },
+   "ok": true,
+   "error": null,
+   "center": {
+    "ref": "anchor/5448587388",
+    "name": "苏州街",
+    "lon": 116.2999736,
+    "lat": 39.9743281,
+    "district": "海淀区",
+    "match_score": 3
+   },
+   "expected": {
+    "count_total": 2,
+    "count_point": 0,
+    "count_area": 0,
+    "count_anchor": 2,
+    "categories": {
+     "railway=station": 2
+    },
+    "nearest": [
+     [
+      "苏州街",
+      0.0
+     ],
+     [
+      "海淀黄庄",
+      986.9
+     ]
+    ]
+   }
+  },
+  "nearby-022": {
    "kind": "tool_error",
    "tool": "query_nearby",
    "args": {
@@ -795,7 +855,7 @@
     "lat": 39.9743281
    },
    "ok": false,
-   "error": "{'text': 'Error executing tool query_nearby: 地铁站 不在可查询范围内：地铁站在 anchor 层（railway=station）只用于定位，不参与半径设施检索：query_nearby 只覆盖 poi_point 与 poi_area 两层，railway 标签不在其中'}",
+   "error": "{'text': 'Error executing tool query_nearby: railway=station 只在 anchor 层（地铁站、火车站、公交站、地名这类定位锚点），默认的半径查询只覆盖 poi_point / poi_area 两层。要查它们请把 include_anchor 设为 true；anchor 的命中会单独计在 count_anchor，不会混进 count_point / count_area。'}",
    "center": {
     "ref": "anchor/5448587388",
     "name": "苏州街",
@@ -805,7 +865,7 @@
     "match_score": 3
    },
    "expected": {
-    "error": "{'text': 'Error executing tool query_nearby: 地铁站 不在可查询范围内：地铁站在 anchor 层（railway=station）只用于定位，不参与半径设施检索：query_nearby 只覆盖 poi_point 与 poi_area 两层，railway 标签不在其中'}"
+    "error": "{'text': 'Error executing tool query_nearby: railway=station 只在 anchor 层（地铁站、火车站、公交站、地名这类定位锚点），默认的半径查询只覆盖 poi_point / poi_area 两层。要查它们请把 include_anchor 设为 true；anchor 的命中会单独计在 count_anchor，不会混进 count_point / count_area。'}"
    }
   },
   "nearby-020": {
@@ -858,6 +918,7 @@
     "count_total": 22,
     "count_point": 5,
     "count_area": 17,
+    "count_anchor": 0,
     "categories": {
      "amenity=hospital": 22
     },

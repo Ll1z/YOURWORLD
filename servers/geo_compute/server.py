@@ -16,7 +16,7 @@ from geo_compute.sandbox import LocalProcessSandbox
 
 mcp = MCPServer(
     name="geo-compute",
-    version="0.4.0",
+    version="0.5.0",
     description="空间查询与统计。数据为北京五区的 OSM POI 与行政边界，"
                 "坐标系 EPSG:4326，距离在 UTM 50N 下按米计算；"
                 "另有受限沙箱 run_python 供工具覆盖不到的计算使用。",
@@ -36,9 +36,15 @@ NO_CENTER_HINT = (
     "若你想知道的是某个区的总量而不需要中心，请改用 summarize_poi。"
 )
 
+ANCHOR_ONLY_HINT = (
+    "{labels} 只在 anchor 层（地铁站、火车站、公交站、地名这类定位锚点），"
+    "默认的半径查询只覆盖 poi_point / poi_area 两层。要查它们请把 include_anchor 设为 true；"
+    "anchor 的命中会单独计在 count_anchor，不会混进 count_point / count_area。"
+)
+
 
 class PoiHit(BaseModel):
-    layer: str = Field(description="poi_point 或 poi_area")
+    layer: str = Field(description="poi_point / poi_area，include_anchor=true 时还会有 anchor")
     osm_id: str
     name: str | None = None
     category_key: str
@@ -69,12 +75,19 @@ class NearbyResult(BaseModel):
                                description="本次使用的预设名；用 categories 自由类别时为 null")
     categories: list[CategoryTally] = Field(
         description="每个请求类别的命中数明细，含 0 命中——0 是结论本身，不是工具失败")
-    count_total: int = Field(description="命中总数；明细被 limit 截断时这个数仍然是完整的")
+    count_total: int = Field(
+        description="命中总数，等于 count_point + count_area + count_anchor；"
+                    "默认 include_anchor=false 时就是 POI 两层之和。明细被 limit 截断时这个数仍然完整")
     count_point: int
     count_area: int
+    count_anchor: int = Field(
+        default=0,
+        description="anchor 层（地铁站、火车站、公交站、地名）的命中数，只可能出现在 "
+                    "include_anchor=true 的查询里；与 POI 两层分开计数，不混进设施口径")
     count_returned: int = Field(description="本次返回的明细条数")
     returned_point: int
     returned_area: int
+    returned_anchor: int = Field(default=0, description="本次返回的明细里 anchor 层的条数")
     hits_truncated: bool = Field(
         description="true 表示明细被 limit 截断：计数完整、列表不全。"
                     "此时不要用沙箱去捞全量，调大 limit 重查即可")
@@ -149,9 +162,10 @@ def get_schema() -> dict:
             },
             "anchor": {
                 "desc": "定位锚点：带名称的地名与车站，供 find_places 解析查询中心用。"
-                        "与 POI 层的区别是它回答「这个地方叫什么、在哪」，而不是「这里有什么设施」",
+                        "与 POI 层的区别是它回答「这个地方叫什么、在哪」，而不是「这里有什么设施」。"
+                        "默认不参与半径查询；要查站点类设施就给 query_nearby 传 include_anchor=true",
                 "fields": ["osm_type", "osm_id", "name", "category_key", "category_value",
-                           "district", "lon", "lat", "geom"],
+                           "district", "lon", "lat", "x_utm", "y_utm", "geom"],
                 "category_key_values": ["place", "railway", "highway", "public_transport"],
                 "examples": ["中关村（neighbourhood）", "王府井（station）", "西直门（station）"],
             },
@@ -186,12 +200,18 @@ def get_categories() -> dict:
     只列出现次数 >= CATALOG_MIN_COUNT 的值（5 条，覆盖 99.3% 的记录），避免上下文被长尾
     撑爆；查询与校验用的是全量清单，长尾值照样能查，拼错才会报错。
     计数是全库口径（五区内外都算），不是某个半径内的计数。
+    anchor_layer_only 单列只在 anchor 层的值（地铁站、公交站等），它们不计入下面两个总数，
+    要 query_nearby 传 include_anchor=true 才查得到。
     """
     inv = query.category_inventory()
+    anc = query.anchor_inventory()
     shown = inv[inv["n"] >= CATALOG_MIN_COUNT]
     by_key: dict[str, dict[str, int]] = {}
     for key, value, n in zip(shown["category_key"], shown["category_value"], shown["n"]):
         by_key.setdefault(key, {})[value] = int(n)
+    anchor_only: dict[str, dict[str, int]] = {}
+    for key, value, n in zip(anc["category_key"], anc["category_value"], anc["n"]):
+        anchor_only.setdefault(key, {})[value] = int(n)
     return {
         "how_to_use": [
             "query_nearby / summarize_poi 的 categories 直接收下面的值，或写 'key=value' 精确限定标签键",
@@ -199,6 +219,12 @@ def get_categories() -> dict:
             "category_value 是主分类，一个设施只归一个 key；同名值出现在多个 key 下时，裸值写法会全部计入",
             "认不出来的类别会直接报错并给近似建议，不会静默返回 0 条",
         ],
+        "anchor_layer_only": {
+            "how_to_use": "这些 (key, value) 只存在于 anchor 层，上面的 by_key 里没有它们；"
+                          "query_nearby 默认查不到，要查就传 include_anchor=true，"
+                          "命中单独计在 count_anchor。summarize_poi 不覆盖 anchor 层。",
+            "values": anchor_only,
+        },
         "total_combinations": int(len(inv)),
         "total_records": int(inv["n"].sum()),
         "shown_min_count": CATALOG_MIN_COUNT,
@@ -229,7 +255,8 @@ def find_places(name: str, district: str | None = None, limit: int = 10) -> list
 @mcp.tool()
 def query_nearby(lon: float, lat: float, radius_m: float = 1000.0,
                  district: str | None = None, categories: list[str] | None = None,
-                 preset: str | None = None, limit: int = 50) -> NearbyResult:
+                 preset: str | None = None, limit: int = 50,
+                 include_anchor: bool = False) -> NearbyResult:
     """查询一个点周围指定半径内有哪些设施，返回按距离升序的明细。
 
     参数：
@@ -245,6 +272,11 @@ def query_nearby(lon: float, lat: float, radius_m: float = 1000.0,
       limit      明细最多回多少条，默认 50；传 0 表示不限。count_total 与逐类别计数
                  永远是全量，被截断时 hits_truncated 为 true。一次大半径查询可能命中上万条，
                  全塞回来只会把结果撑爆、让真正有用的部分看不见。
+      include_anchor
+                 是否把 anchor 层（地铁站、火车站、公交站、地名等定位锚点）也算进来。
+                 默认 false，只查 poi_point / poi_area 两层——anchor 回答「在哪」而不是
+                 「有什么」，混进设施统计会凭空多出几百个地名节点。问地铁站这类设施时传 true，
+                 命中单独记在 count_anchor / returned_anchor，不混进 count_point / count_area。
 
     categories 与 preset 都不给会直接报错：本工具没有默认类别。默认一个类别会让
     「想查高校却拿到医院」变成静默替换，看起来像正常结果。
@@ -257,15 +289,24 @@ def query_nearby(lon: float, lat: float, radius_m: float = 1000.0,
 
     try:
         specs = query.resolve_categories(categories, preset)
-        df, _, _ = query.nearby(lon, lat, radius_m, district, specs)
+        if not include_anchor:
+            # anchor 专属类别在 POI 两层里必然是 0 条。这个 0 不是「附近没有」，
+            # 是「查错层了」，必须报出来，不能让调用方拿个 0 回去当初结论。
+            only_anchor = query.missing_from_poi(specs)
+            if only_anchor:
+                raise ToolError(ANCHOR_ONLY_HINT.format(
+                    labels="、".join(s.label for s in only_anchor)))
+        df, _, _ = query.nearby(lon, lat, radius_m, district, specs,
+                                include_anchor=include_anchor)
     except ValueError as e:
         raise ToolError(str(e)) from e
     dups = query.find_duplicates(df)
     # 计数在截断前算完，明细按距离取前 limit 条：
     # 实测一次 10 公里半径的高校查询返回 158 条、37920 字符，回喂时被截到 20000，
     # 模型拿不到完整列表就跑去沙箱里捞，连着几步都耗在那儿。
-    count_total, count_point, count_area = len(df), \
-        int((df["layer"] == "poi_point").sum()), int((df["layer"] == "poi_area").sum())
+    count_total, count_point, count_area, count_anchor = len(df), \
+        int((df["layer"] == "poi_point").sum()), int((df["layer"] == "poi_area").sum()), \
+        int((df["layer"] == "anchor").sum())
     shown = df if limit <= 0 else df.head(int(limit))
     hits = [PoiHit(**{k: r.get(k) for k in PoiHit.model_fields}) for r in shown.to_dict("records")]
 
@@ -276,9 +317,11 @@ def query_nearby(lon: float, lat: float, radius_m: float = 1000.0,
         count_total=count_total,
         count_point=count_point,
         count_area=count_area,
+        count_anchor=count_anchor,
         count_returned=len(shown),
         returned_point=int((shown["layer"] == "poi_point").sum()),
         returned_area=int((shown["layer"] == "poi_area").sum()),
+        returned_anchor=int((shown["layer"] == "anchor").sum()),
         hits_truncated=len(shown) < count_total,
         hits=hits,
         suspected_duplicates=dups,
@@ -291,7 +334,8 @@ def query_nearby(lon: float, lat: float, radius_m: float = 1000.0,
             "categories 里 count=0 的类别就是「确实没有」，不要换成别的类别来替代",
             "hits 只是最近 limit 条；hits_truncated 为 true 时完整列表要用更大的 limit 重查，"
             "不要用 run_python 绕过去捞全量明细——那等于在脚本里重写一遍查询口径",
-            "只覆盖 poi_point / poi_area 两层；地铁站、火车站等只在 anchor 层，不参与半径检索",
+            "默认只覆盖 poi_point / poi_area 两层；地铁站、火车站、公交站只在 anchor 层，"
+            "要查就给 include_anchor 传 true，命中单独计在 count_anchor",
         ],
     )
 

@@ -72,13 +72,14 @@ print(f"  {len(a):,} 行")
 
 print("=== anchor ===")
 n = load(r"data\processed\anchors.gpkg", "anchor")
+n["x_utm"], n["y_utm"] = T.transform(n["lon"].values, n["lat"].values)
 n["wkt"] = shapely.to_wkt(n.geometry.values, rounding_precision=8)
 con.register("src", n[["osm_type", "osm_id", "name", "category_key", "category_value",
-                       "district", "lon", "lat", "wkt"]])
+                       "district", "lon", "lat", "x_utm", "y_utm", "wkt"]])
 con.execute("""
 CREATE OR REPLACE TABLE anchor AS
 SELECT osm_type, osm_id, name, category_key, category_value, district,
-       lon, lat, ST_GeomFromText(wkt) AS geom
+       lon, lat, x_utm, y_utm, ST_GeomFromText(wkt) AS geom
 FROM src
 """)
 print(f"  {len(n):,} 行")
@@ -90,7 +91,7 @@ for tbl, col in (("districts", "geom"), ("poi_point", "geom"), ("poi_area", "geo
         print(f"  {tbl}: R-tree 已建立")
     except Exception as e:
         print(f"  {tbl}: R-tree 失败 ({type(e).__name__}: {str(e)[:80]})")
-for tbl in ("poi_point", "poi_area"):
+for tbl in ("poi_point", "poi_area", "anchor"):
     con.execute(f"CREATE INDEX idx_{tbl}_utm ON {tbl} (x_utm, y_utm)")
     print(f"  {tbl}: x_utm/y_utm 索引已建立")
 
